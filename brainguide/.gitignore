@@ -1,0 +1,9 @@
+.venv/
+.venv-bd/
+__pycache__/
+*.pyc
+.DS_Store
+outputs/
+*.pth
+*.ckpt
+*.safetensors

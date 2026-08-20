@@ -1,0 +1,27 @@
+# Runnable-today config: BrainDiVE-style CLIP + linear head as the scorer.
+# Smoke-test it first:  python run.py --config configs/braindive_clip.yaml --smoke
+device: auto
+model_id: runwayml/stable-diffusion-v1-5
+
+encoder:
+  name: braindive_clip          # braindive_clip | mock | universal
+  clip_model_id: openai/clip-vit-base-patch32
+  num_voxels: 1000
+  weights_path: null            # null -> random head (the "mock" behavior)
+  seed: 0
+
+steer:
+  voxels: {start: 0, stop: 1000}   # target ROI to drive; null = all num_voxels
+  sign: 1.0                        # +1 maximize the region, -1 suppress it
+  reduce: mean
+
+generate:
+  prompt: "a photograph"
+  num_inference_steps: 50
+  guidance_scale: 7.5
+  sag_scale: 0.75
+  clip_guidance_scale: 100.0
+  num_images_per_prompt: 1
+  seed: 0
+
+out_dir: outputs

@@ -1,0 +1,26 @@
+# Keep the build context small — bake CODE only, never weights or papers.
+**/.venv/
+**/.venv-bd/
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+.git/
+
+# Papers / large docs — not needed in the image
+*.pdf
+
+# Model weights & caches — MOUNTED at runtime, never baked
+**/*.pth
+**/*.ckpt
+**/*.safetensors
+**/*.npy
+# …except the small ROI voxel-index files, which ARE part of the app
+!brainguide/brainguide/roi/*.npy
+brainit-fmri/results/
+brainit-fmri/data/nsd_data/
+brainit-fmri/data/derived_data/
+brainit-fmri/data/external_models/
+
+# Local outputs and the old scratch dir
+brainguide/outputs/
+bd_run/
