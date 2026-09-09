@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guiding a Brain Encoder to Synthesize Images — a teaching guide with rendered math</title>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']], tags: 'none' },
+    svg: { fontCache: 'global' },
+    chtml: { scale: 1.0 }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3d; --accent:#7aa2ff; --accent2:#5ee0c0; --warn:#ffb454; --bad:#ff6b7a; --good:#5ee0a0;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7fb; --panel:#ffffff; --panel2:#f0f2f8; --ink:#1a1d26; --muted:#5a6272;
+           --line:#e2e6ef; --accent:#3d6bff; --accent2:#0aa88a; --warn:#b5730a; --bad:#d23a4c; --good:#0f9d63; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:44px 22px 90px}
+  header.top{margin-bottom:26px}
+  .kicker{color:var(--accent2);font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:12px}
+  h1{font-size:31px;line-height:1.18;margin:.35em 0 .3em}
+  .lede{color:var(--muted);font-size:16px;max-width:72ch}
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:26px 0 34px}
+  .toc h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+  .toc ol{margin:0;padding-left:20px}
+  .toc li{margin:6px 0}
+  .toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent}
+  .toc a:hover{border-bottom-color:var(--accent)}
+  .part{margin:44px 0 0}
+  .part>h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin:0 0 2px}
+  .part>h3{font-size:23px;line-height:1.25;margin:.1em 0 .4em}
+  section.block{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:16px 0}
+  h4{margin:24px 0 6px;font-size:16px;color:var(--accent2)}
+  h4:first-child{margin-top:4px}
+  p{margin:11px 0}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:7px 0}
+  a{color:var(--accent)}
+  b{color:var(--ink)}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .callout{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid var(--line)}
+  .callout.good{background:color-mix(in srgb,var(--good) 12%,transparent);border-color:color-mix(in srgb,var(--good) 45%,var(--line))}
+  .callout.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+  .callout.key{background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+  .tblwrap{overflow-x:auto;margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-size:12.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
+  .steps{counter-reset:s;list-style:none;padding-left:0}
+  .steps>li{counter-increment:s;position:relative;padding-left:44px;margin:16px 0}
+  .steps>li::before{content:counter(s);position:absolute;left:0;top:-2px;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:14px}
+  .novel{color:var(--accent2);font-weight:700}
+  footer{color:var(--muted);font-size:13px;margin-top:46px;border-top:1px solid var(--line);padding-top:18px}
+
+  /* ---- math teaching kit ---- */
+  /* the pedagogical box: Motivation -> Approach -> Result -> Outcome around each key equation */
+  .derive{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:6px 18px 10px;margin:18px 0}
+  .drow{display:flex;gap:14px;margin:12px 0;font-size:14.5px;align-items:baseline}
+  .dlab{flex:0 0 92px;color:var(--accent2);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:11px;padding-top:1px}
+  .dlab.q{color:var(--warn)} .dlab.a{color:var(--accent)} .dlab.o{color:var(--good)}
+  .dtext{flex:1 1 auto}
+  .eqwrap{display:flex;align-items:center;gap:12px;margin:10px 0;overflow-x:auto}
+  .eqwrap .num{flex:0 0 auto;color:var(--muted);font:12px ui-monospace,Menlo,monospace}
+  .eqwrap mjx-container{margin:0 !important}
+  .defs{font-size:13.5px;color:var(--muted);margin:10px 0}
+  .defs code{font-style:normal}
+  .plain{color:var(--muted);font-size:13.5px;margin:6px 0 2px}
+
+  /* paper cards */
+  .paper{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:15px 17px;margin:14px 0}
+  .paper h5{margin:0 0 4px;font-size:16px;color:var(--ink)}
+  .paper .venue{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+  .paper .row{margin:8px 0;font-size:14px}
+  .paper .lab{display:inline-block;min-width:74px;color:var(--accent);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;vertical-align:top}
+  .paper .lab+span{display:inline}
+  .paper ol{margin:4px 0 4px 0;padding-left:20px;font-size:14px}
+  .paper .links a{margin-right:12px;font-size:13px}
+  .paper h6{margin:15px 0 5px;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:700}
+  .paper h6::before{content:"▸ ";color:var(--accent2)}
+  .paper p{font-size:14px;margin:7px 0}
+  .paper ul{font-size:14px;margin:6px 0}
+  .paper .steps>li{margin:9px 0;padding-left:40px}
+  .paper .steps>li::before{width:24px;height:24px;font-size:12px}
+  .watch{color:var(--warn);font-weight:700}
+  .win{color:var(--good);font-weight:700}
+  .grp{margin:22px 0 6px;font-size:15px;color:var(--accent2);font-weight:700;border-left:3px solid var(--accent2);padding-left:10px}
+  .refs{font-size:13.5px}
+  .refs li{margin:5px 0}
+  .pathnote{background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;color:var(--muted);margin:12px 0}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff;background:var(--accent);border-radius:999px;padding:2px 9px;margin-left:6px;vertical-align:middle}
+  .tag.rec{background:var(--good);color:#04120c}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="kicker">MindReading · teaching guide</div>
+  <h1>Guiding a brain encoder to synthesize images</h1>
+  <p class="lede">Why steering Stable Diffusion with <i>your</i> encoder's gradient underperforms, the math of every method built up slowly (motivation → approach → what it gives you), each key paper explained compactly — and a concrete plan for the paper you want: <b>give a voxel set → generate an image → let a vision model name what it sees → edit the image → check whether activation drops → iterate.</b></p>
+  <p class="lede" style="margin-top:8px">New to this? <b>Start with <a href="#bg">Part 0</a></b> — it explains, in plain words and with no math, what all the pieces are (fMRI voxels, an ROI, a "brain encoder," a diffusion model, and what "guiding" one even means) and why the whole thing is worth doing. Every later part assumes that picture.</p>
+  <p class="plain">Math renders with MathJax. If equations briefly show as raw <code>\( … \)</code>, give the page a second to typeset.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#bg">Part 0 — Background in plain words (what every piece is, and why we're doing this)</a></li>
+    <li><a href="#why">Part I — Why guiding <i>your</i> encoder doesn't work well (the mismatch, built up step by step)</a></li>
+    <li><a href="#math">Part II — The math of gradient guidance, derived slowly</a></li>
+    <li><a href="#papers">Part III — The papers, each explained concisely with the key idea, steps &amp; a link</a></li>
+    <li><a href="#build">Part IV — A build plan for <i>your</i> paper (voxel → image → concept → ablate → iterate)</a></li>
+    <li><a href="#survey">Parts V &amp; VI — A two-area survey: taming CLIP gradients, and fixing <i>your</i> DINOv2 encoder</a></li>
+    <li><a href="#refs">Verified references (every link checked 2026)</a></li>
+  </ol>
+</nav>
+
+<div class="callout key"><b>TL;DR.</b> Your prettiness gap is a <b>feature-space mismatch</b>, not a worse encoder: SD 2.1 was only ever trained to obey <b>CLIP</b>-shaped steering, so a CLIP encoder's gradient is <i>renderable</i> and a DINOv2 encoder's is partly <i>adversarial</i> → texture. It's a known problem (adversarial / off-manifold gradients). You can fix the gradient path (make the encoder robust, or add an adapter, or reward-fine-tune the generator), <b>or</b> sidestep it entirely by only ever using the encoder as a <i>score</i> (search / VLM / RL loop) — which is what your target paper should do.</div>
+
+<!-- ============ PART 0 ============ -->
+<div class="part" id="bg">
+  <h2>Part 0</h2>
+  <h3>Background in plain words — what every piece is, and why we're doing this</h3>
+  <p class="lede" style="margin-top:6px">No math here. If you already know what an fMRI encoder and a diffusion model are, skip to <a href="#why">Part I</a>. Otherwise, read this once and the rest of the guide will click.</p>
+</div>
+<section class="block">
+  <h4>The scientific question</h4>
+  <p>The visual cortex is not one uniform sheet — it's carved into regions that each seem to <i>care about a specific kind of thing</i>. One patch lights up for faces, another for places/scenes, another for words, another for bodies. Neuroscientists have spent decades asking, one hand-picked hypothesis at a time, <b>"what does this patch of cortex actually represent?"</b> This project turns that around: instead of guessing a concept and testing it, we ask the brain to <i>show us</i> — synthesize the image that would drive a chosen patch as hard as possible, then read off what it depicts.</p>
+
+  <h4>The four building blocks</h4>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>Piece</th><th>In one sentence</th><th>The mental picture</th></tr></thead>
+    <tbody>
+      <tr><td><b>Voxel</b></td><td>The smallest unit an fMRI scanner measures — a tiny 3-D cube of brain (~1–2 mm) with one activation number per image you show the subject.</td><td>A single pixel of a brain scan. Show a photo → each voxel returns "how hard I fired."</td></tr>
+      <tr><td><b>ROI</b> (region of interest)</td><td>A named <i>set</i> of voxels that behave alike — e.g. FFA (faces), PPA (places), VWFA (words).</td><td>A neighborhood of brain-pixels you've decided to study together. Your "target."</td></tr>
+      <tr><td><b>Brain encoder</b> <code>f</code></td><td>A model that <i>predicts</i> those voxel numbers directly from an image — image in, predicted brain activation out.</td><td>A stand-in for the subject in the scanner. Once trained, you can ask "how much would this ROI fire?" for <i>any</i> image, instantly, with no scanner. It has two stages: a frozen vision backbone (CLIP or DINOv2) that turns the image into features, then a small learned <i>read-out</i> that maps features → voxels.</td></tr>
+      <tr><td><b>Diffusion model</b> (Stable Diffusion)</td><td>An image <i>generator</i> that starts from pure noise and denoises it, step by step, into a photorealistic picture.</td><td>A sculptor who starts with static and, over ~50 passes, carves out a real-looking image. Left alone it makes <i>a</i> plausible image; we want to bias <i>which</i> one.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key"><b>The whole idea in one sentence.</b> Chain them: let the diffusion model generate an image, ask the brain encoder "how hard does my ROI fire on this?", and <b>push the generator toward images that score higher</b> — repeat until it converges on a picture the ROI loves. Whatever that picture depicts is the region's preferred concept. That push is the "<b>guidance</b>" this whole guide is about.</p></div>
+
+  <h4>What "guiding" the generator means</h4>
+  <p>A diffusion model already knows how to nudge noise toward "a realistic image." <b>Guidance</b> adds a second nudge at every denoising step: "…and also toward images my ROI likes." The natural way to compute that second nudge is a <b>gradient</b> — the encoder's answer to "which way should I change the pixels to make the ROI fire <i>more</i>?" You add a little of that direction at each step. This is exactly how the founding paper of this lineage, <a href="#papers">BrainDiVE</a>, works, and it's the method whose failure mode Part I dissects.</p>
+
+  <h4>Two words you'll see everywhere</h4>
+  <ul>
+    <li><b>Gradient</b> — the direction of steepest increase. "The gradient of ROI-activation with respect to the pixels" = the exact tweak to every pixel that most raises the predicted firing. Guidance = repeatedly take a small step along it.</li>
+    <li><b>Manifold</b> — the (very thin, curved) set of pixel-arrays that look like <i>real photographs</i>, floating inside the astronomically larger space of all possible pixel-arrays (almost all of which are noise). "On-manifold" = looks like a real image; "off-manifold" = looks like static. Keep these two words in hand — the entire diagnosis in Part I is about a gradient that points <i>off</i> the manifold.</li>
+  </ul>
+
+  <h4>The one-paragraph version of what goes wrong (so Part I has a target)</h4>
+  <p>Here's the tension the rest of the guide unpacks. The generator (Stable Diffusion 2.1) was trained to take direction in <b>one specific "language"</b>: CLIP embeddings. If your brain encoder is <i>also</i> built on CLIP, its "make the ROI fire more" gradient is phrased in a language the generator understands, so the push produces a cleaner, <i>real-looking</i> image. But if your encoder is built on <b>DINOv2</b> (a different vision model that sees the world differently), its gradient is phrased in a language the generator was never taught — so the push, cranked hard enough to matter, drags the image <b>off the manifold into adversarial texture</b> (weird high-frequency static that fools the encoder's score without depicting anything). That's the "prettiness gap." Part I makes this precise; Parts V–VI fix it.</p>
+</section>
+
+<!-- ============ PART I ============ -->
+<div class="part" id="why">
+  <h2>Part I</h2>
+  <h3>Why guiding your encoder doesn't work well</h3>
+</div>
+<section class="block">
+  <p class="lede" style="margin-top:0">Three short steps take you from "how guidance is wired" to a <b>single number that predicts whether your images come out as photos or as static.</b> Read Step 1 slowly — it's the one you asked about, and everything after it is a consequence.</p>
+
+  <h4>Step 1 — What "gradient guidance" actually computes</h4>
+  <p>Recall the plan from <a href="#bg">Part 0</a>: at every denoising step, on top of the generator's own "toward a realistic image" nudge, you add a second nudge — "…and toward images my ROI likes." That second nudge is a <b>gradient</b>. This step writes it down and shows that the gradient you actually apply is <i>not</i> quite the one your encoder asked for — it gets passed through a translator first, and that translator is the whole story.</p>
+
+  <div class="callout key" style="margin-top:6px"><b>The one thing to take away.</b> Your encoder forms its wish in <b>pixel space</b> ("brighten <i>these</i> pixels, darken <i>those</i>"). But the generator doesn't edit pixels directly — it edits a compressed code called a <b>latent</b>, which a <b>decoder</b> later expands into pixels. So the encoder's pixel-wish has to be <i>translated back through the decoder</i> into a latent-wish before it can be applied. That translation can <b>faithfully carry the wish, or garble it</b> — and which one you get is exactly the CLIP-vs-DINOv2 story.</div>
+
+  <h5 style="color:var(--accent2);margin:18px 0 6px;font-size:14px">First, the cast (all you need for eq. 1)</h5>
+  <div class="defs" style="font-size:14px;color:var(--ink)">
+    <ul style="margin:6px 0">
+      <li><b><code>z</code> — the latent.</b> A small compressed code (a 4×64×64 tensor for SD, vs. 3×512×512 pixels). The generator works entirely in here; it's cheaper and smoother than raw pixels. <i>This is the thing you're allowed to edit.</i></li>
+      <li><b><code>D</code> — the decoder</b> (the "D" of the VAE). Expands a latent into an actual image: <code>x = D(z)</code>. This is the <i>only</i> bridge from the world you edit (latents) to the world your encoder reads (pixels).</li>
+      <li><b><code>r</code> — the reward.</b> Your encoder's headline number: the mean predicted ROI activation, <code>r(x) = mean over voxels of f(x)</code>. Bigger = the ROI fires harder. This is what you're trying to increase.</li>
+      <li><b>\(\nabla_x r\) — the encoder's pixel-wish.</b> "If I could touch the pixels directly, <i>this</i> is the exact change that most raises the ROI's firing." Set <b>entirely by your encoder</b> <code>f</code> — CLIP and DINOv2 give different wishes for the same image.</li>
+      <li><b>\(J_D\) — the decoder's Jacobian</b> (defined below). The translator.</li>
+    </ul>
+  </div>
+
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">Your encoder <code>f</code> reads <i>pixels</i>, so its wish \(\nabla_x r\) lives in pixel space. But the only dial you can turn is the <i>latent</i> <code>z</code>. You cannot apply a pixel-wish to a latent directly — they're different spaces. So: what latent change best serves the pixel-wish? That's a chain-rule question — the reward depends on the latent only <i>through</i> the decoder (<code>z → D → x → r</code>).</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Write the reward as a function of the latent by composing it with the decoder, <code>r(D(z))</code>, and differentiate with respect to <code>z</code>. The chain rule splits the result into two factors — the decoder's local behavior, then the encoder's wish.</span></div>
+    <div class="eqwrap"><span>\[ g \;=\; \nabla_{z}\, r\big(D(z)\big) \;=\; \underbrace{J_D^{\top}}_{\substack{\text{translator:}\\ \text{decoder Jacobian}}}\; \underbrace{\nabla_{x}\, r(x)}_{\substack{\text{the encoder's}\\ \text{pixel-wish}}}, \qquad J_D=\frac{\partial D}{\partial z} \]</span><span class="num">(1)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">The latent update <code>g</code> you actually apply is your encoder's pixel-wish <b>after the decoder's translator \(J_D^{\top}\) has reshaped it</b>. If the pixel-wish is something the decoder can produce by moving the latent, the translation is faithful and you get a coherent image. If it isn't, the translator mangles the wish — and that mangled push is what shows up as texture. <b>Everything in Steps 2–3 is about measuring how badly it gets mangled.</b></span></div>
+  </div>
+
+  <div class="callout" style="border-color:color-mix(in srgb,var(--accent2) 45%,var(--line));background:color-mix(in srgb,var(--accent2) 10%,transparent)">
+    <b>What is the "Jacobian," really — and why a transpose?</b>
+    <p style="margin:8px 0 6px">Forget the formula for a second. The decoder <code>D</code> is a function: wiggle the latent a little, the output image wiggles some way. The <b>Jacobian \(J_D\) is just the table of "if I nudge <i>this</i> latent number, <i>which</i> pixels move, and how much."</b> It's the decoder's local cause-and-effect chart. Because latent-space and pixel-space have different sizes and shapes, this chart also <b>rotates and stretches</b> any direction you send through it — a clean latent direction can come out as a lopsided pixel direction, and vice-versa.</p>
+    <p style="margin:6px 0">We want to go the <i>other</i> way — from a pixel-<i>wish</i> back to the latent-nudge that best delivers it. That reverse pass uses the <b>transpose</b> \(J_D^{\top}\) (this is precisely what backpropagation computes; you never build the matrix, autograd applies it for you). The intuition: \(J_D^{\top}\) takes the pixel-wish and answers "given how the decoder actually maps latents to pixels, which latent tweak pushes hardest in the wished-for direction?"</p>
+    <p style="margin:6px 0 2px"><b>The catch that drives the whole guide:</b> the decoder can only produce pixel-changes that lie in its <i>reachable set</i> — the images it was trained to make (real-looking photos). If your encoder's pixel-wish points at a change the decoder can reach, \(J_D^{\top}\) passes it through cleanly. If the wish points somewhere the decoder <i>can't</i> reach (e.g. "add this precise high-frequency shimmer"), \(J_D^{\top}\) can only return the shadow of it that <i>is</i> reachable — a distorted push. A CLIP encoder tends to wish for reachable things; a DINOv2 encoder often wishes for unreachable ones. Hold that thought — Step 2 makes "reachable vs. not" exact.</p>
+  </div>
+
+  <div class="callout" style="border-color:color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 9%,transparent)"><b>Analogy.</b> You (the encoder) want a room repainted a very specific shade. But you can't touch the walls — you can only phone a painter (the decoder) who mixes only from a fixed set of tins. If your shade is mixable from his tins, you get exactly what you asked for. If it isn't, he doesn't refuse — he mixes the <i>closest</i> thing he can, and hands you something a bit off. The decoder never says "no"; it just quietly returns the nearest thing it <i>can</i> make. When your wish is far from anything makeable, "nearest thing" is a mess. \(J_D^{\top}\) is the painter.</div>
+
+  <h4>Step 2 — Split the wish into a good half and a bad half</h4>
+  <p>Step 1 said the decoder can only carry the part of your wish that it can actually produce. Let's make "the part it can produce" precise. From <a href="#bg">Part 0</a>: real photos occupy a thin, curved surface — the <b>manifold</b> \(\mathcal{M}\) — inside the vast space of all pixel arrays. Any pixel-wish can be split into a piece that slides <b>along</b> that surface (toward a <i>different real photo</i>) and a piece that pokes straight <b>off</b> it (toward noise). Write \(P_{\mathcal M}\) for the operation "keep only the along-the-surface part."</p>
+
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">"Make the ROI fire more" has two <i>completely different</i> kinds of solution, and the encoder's raw wish is a blend of both: <b>(a)</b> turn the photo into a <i>more ROI-preferred photo</i> (a real cat becomes a bigger, more central cat) — useful; or <b>(b)</b> paint a nearly-invisible high-frequency pattern that spikes the encoder's score without changing what the image depicts — an <i>adversarial</i> trick. We need to separate the honest half from the cheating half.</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Project the pixel-wish onto the manifold's tangent plane. The along-surface part is the honest half; the leftover perpendicular part is the cheat.</span></div>
+    <div class="eqwrap"><span>\[ \nabla_x r \;=\; \underbrace{g_{\parallel}}_{\substack{\text{honest:}\\ \text{a more-ROI-like real photo}}} \;+\; \underbrace{g_{\perp}}_{\substack{\text{cheat:}\\ \text{an adversarial pattern}}}, \qquad g_{\parallel}=P_{\mathcal M}\,\nabla_x r,\quad g_{\perp}=(I-P_{\mathcal M})\,\nabla_x r \]</span><span class="num">(2)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">\(g_{\parallel}\) is exactly the "reachable" part from Step 1 — the decoder carries it faithfully and the image stays a photo. \(g_{\perp}\) is <i>literally</i> an adversarial perturbation (ascending it in raw pixels is textbook how you fool a network). At a gentle guidance strength the diffusion prior scrubs \(g_{\perp}\) away each step. But <b>crank the strength to force real change and \(g_{\perp}\) wins</b> — the image slides off \(\mathcal{M}\) and collapses into <b>texture</b>. That tug-of-war is the failure you saw.</span></div>
+  </div>
+
+  <h4>Step 3 — One number that predicts image quality: manifold alignment \(\alpha\)</h4>
+  <p>So the question "will guidance give me a photo or static?" reduces to a single ratio: <b>of your encoder's total wish, what fraction is the honest, along-the-manifold half?</b> Call it \(\alpha\). Near 1 → almost all of the wish is renderable → clean photos. Near 0 → almost all of it is the adversarial cheat → texture.</p>
+  <div class="eqwrap"><span>\[ \alpha(f) \;=\; \frac{\lVert P_{\mathcal M}\,\nabla_x r\rVert}{\lVert \nabla_x r\rVert}\;\in\;[0,1], \qquad \text{CLIP: } \alpha \text{ high} \quad\bullet\quad \text{DINOv2: } \alpha \text{ low} \]</span><span class="num">(3)</span></div>
+  <p class="plain">Read it as a percentage: \(\alpha=0.9\) means 90% of the push helps and 10% fights you (the prior easily mops that up); \(\alpha=0.3\) means 70% of every step is dragging you toward static, and no amount of tuning the <i>strength</i> escapes that — turning it up scales the good and bad halves together (see below). \(\alpha\) is a property of <b>your encoder's geometry</b>, not of how hard you push.</p>
+
+  <h4>Why CLIP is aligned (high \(\alpha\)) and DINOv2 is not (low \(\alpha\))</h4>
+  <ol>
+    <li><b>Stable Diffusion's steering wheel <i>is</i> CLIP.</b> The generator was trained to take direction through one specific input — CLIP text embeddings feeding its cross-attention. CLIP is the <i>only</i> semantic language the UNet ever learned to obey. So "CLIP directions" are renderable by construction → they land in the honest \(g_{\parallel}\) half. A CLIP <i>image</i> encoder shares that same geometry (CLIP was trained to line up images and text), so BrainDiVE's gradient is mostly reachable: <b>high \(\alpha\)</b>. This is <i>why</i> the original BrainDiVE images look good — not because its encoder is a better brain model.</li>
+    <li><b>DINOv2 was trained for a different job</b> — self-supervised patch self-distillation (great for dense correspondence and part structure), never tied to Stable Diffusion's conditioning. Its sharpest "make the ROI fire" directions are ones the generator was never taught to move along → they fall into the off-manifold \(g_{\perp}\) half: <b>low \(\alpha\)</b>. Same brain-prediction skill, wrong language for <i>this</i> generator.</li>
+    <li><b>Turning up the guidance scale can't rescue it.</b> The scale multiplies the <i>whole</i> wish — it scales \(g_{\parallel}\) and \(g_{\perp}\) by the same factor, so it never improves the <i>ratio</i> \(\alpha\). Past the point where the prior can still absorb \(g_{\perp}\), the cheat half dominates and you get static. (This is why "just push harder" produced the oversaturated/blank collapse, not better images.)</li>
+  </ol>
+  <div class="callout key">So <b>\(\alpha\) is your entire prettiness gap</b>, cleanly separated from neuroscience accuracy: two encoders can predict voxels <i>equally well</i> yet have wildly different \(\alpha\), and only the low-\(\alpha\) one makes ugly images. You were never fighting a worse brain model — you were fighting a lower \(\alpha\). That reframes the fix: either <b>raise \(\alpha\)</b> (robustify the encoder, or route the gradient through renderable features — <a href="#dino">Part VI</a>, options 2–3), or <b>make \(\alpha\) irrelevant</b> by never taking the encoder's gradient at all (use it only as a <i>score</i> — Part VI option 1, and Path B in <a href="#build">Part IV</a>). Part III surveys every fix; Parts V–VI rank them for your budget.</div>
+</section>
+
+<!-- ============ PART II ============ -->
+<div class="part" id="math">
+  <h2>Part II</h2>
+  <h3>The math of gradient guidance, derived slowly</h3>
+</div>
+<section class="block">
+  <p class="lede" style="margin-top:0">Part I told you <i>what</i> guidance computes and why it can misfire. This part builds the machine from scratch, one motivated step at a time, so eq. (7) — the actual line of code BrainDiVE runs — feels inevitable. The arc: <b>(1)</b> a diffusion model is secretly a gradient of log-probability; <b>(2)</b> so we can peek at the clean image it's heading toward; <b>(3)</b> so we can bend it toward "the ROI fires" with Bayes' rule; <b>(4)</b> which is exactly BrainDiVE; <b>(5–6)</b> plus the two practical fixes that stop it exploding. You can skim this on a first read and come back — Parts III–VI don't require the derivations.</p>
+  <div class="defs">Symbols: \(x_t\) = noisy image at step \(t\); \(\varepsilon_\theta\) = the denoiser's predicted noise; \(\bar\alpha_t\) = retained-signal fraction (\(\approx 1\) early → \(\approx 0\) late); \(V\) = your voxel set; \(s\) = guidance scale.</div>
+
+  <h4>1 · Diffusion is secretly a "score" model</h4>
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">To steer sampling we need the gradient of \(\log p_t(x_t)\) (the "score"). But diffusion models don't output a score — they output predicted noise. Are these the same thing?</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Write the forward corruption, then read off the identity between predicted noise and the score.</span></div>
+    <div class="eqwrap"><span>\[ x_t=\sqrt{\bar\alpha_t}\,x_0+\sqrt{1-\bar\alpha_t}\;\varepsilon, \qquad \nabla_{x_t}\log p_t(x_t)=-\,\frac{\varepsilon_\theta(x_t,t)}{\sqrt{1-\bar\alpha_t}} \]</span><span class="num">(4)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">Predicting noise <b>is</b> knowing the score (up to a scale). That's the hook that lets us add an external gradient to the sampler.</span></div>
+  </div>
+
+  <h4>2 · The clean-image bridge (Tweedie / predicted-\(x_0\))</h4>
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">Your encoder only understands <i>clean</i> images, but at step \(t\) you hold a noisy \(x_t\). Feeding \(x_t\) to CLIP/DINO gives a meaningless, adversarial gradient. We need a clean image to score.</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Use the same noise prediction to jump to the model's best clean guess, then score <b>that</b>.</span></div>
+    <div class="eqwrap"><span>\[ \hat x_0(x_t)=\frac{x_t-\sqrt{1-\bar\alpha_t}\;\varepsilon_\theta(x_t,t)}{\sqrt{\bar\alpha_t}} \]</span><span class="num">(5)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">One clean estimate per step, in-distribution for your encoder. This single trick powers DPS, FreeDoM, Universal Guidance, and BrainDiVE alike.</span></div>
+  </div>
+
+  <h4>3 · Guidance = Bayes on the score</h4>
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">You don't want <i>any</i> image \(p(x)\); you want images where "the ROI fires," i.e. \(p(x\mid y)\). How do you bend the sampler toward the condition \(y\)?</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Bayes splits the conditional score into the prior score (the model) plus a reward gradient. Convert to noise form and you get a drop-in correction to \(\varepsilon_\theta\).</span></div>
+    <div class="eqwrap"><span>\[ \nabla\log p_t(x_t\mid y)=\underbrace{\nabla\log p_t(x_t)}_{\text{the model}}+\underbrace{\nabla\log p_t(y\mid x_t)}_{\text{your reward}}, \qquad \hat\varepsilon=\varepsilon_\theta-s\,\sqrt{1-\bar\alpha_t}\;\nabla_{x_t}\log p_t(y\mid x_t) \]</span><span class="num">(6)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">"Guidance" is just: run the model, then nudge its noise by your reward gradient. Now we only need to define the reward.</span></div>
+  </div>
+
+  <h4>4 · The concrete BrainDiVE step</h4>
+  <p>Model the likelihood as a reward, \(p(y\mid x_t)\propto \exp(r)\), evaluate \(r\) on the clean estimate \(\hat x_0\), and the whole thing is a single backprop through decoder + encoder:</p>
+  <div class="eqwrap"><span>\[ r(x)=\frac{1}{|V|}\sum_{v\in V} w_v\,f_v(x); \qquad g_t=\nabla_{z_t}\, r\big(D(\hat x_0(z_t))\big); \qquad z_t\leftarrow z_t+\lambda_t\,g_t \]</span><span class="num">(7)</span></div>
+
+  <h4>5 · The one knob that matters: normalize the step</h4>
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">Raw \(\lVert g_t\rVert\) swings wildly across timesteps and across ROIs — too small does nothing, too large explodes into texture (this is exactly the blank/oversaturated-image footgun).</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Tie the step size to the model's own noise scale so guidance is always commensurate with the denoising step.</span></div>
+    <div class="eqwrap"><span>\[ \lambda_t \;=\; s\cdot\frac{\lVert\varepsilon_\theta(z_t,t)\rVert}{\lVert g_t\rVert+\delta}, \qquad\text{then clip } \lVert g_t\rVert \]</span><span class="num">(8)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">An ROI-independent schedule that stops the collapse — the practical fix that made your images appear at all.</span></div>
+  </div>
+
+  <h4>6 · Healing the off-manifold damage</h4>
+  <p>Two cheap add-ons raise quality far more than raising \(s\): <b>(a) time-travel</b> — renoise \(t{-}1\!\to\!t\) and redo the step \(k\) times so the prior erases \(g_{\perp}\); <b>(b) manifold projection</b> — keep only \(P_{\mathcal M} g_t\). Both are detailed in Part III (FreeDoM, MCG/MPGD) and Part V.</p>
+  <div class="callout warn"><b>Flow-matching caveat.</b> FLUX/SD3 predict a velocity on a <i>straight</i> noise→data path, so \(\hat x_0\) is a linear extrapolation that leaves \(\mathcal M\) faster → gradient guidance drifts <i>harder</i>. Use FLUX as a great generator, but "flow + backprop the encoder" is an open problem (Rectified-CFG++, CFG-MP).</div>
+</section>
+
+<!-- ============ PART III ============ -->
+<div class="part" id="papers">
+  <h2>Part III</h2>
+  <h3>The papers, explained</h3>
+  <p class="lede" style="margin-top:6px">Each card: what it is · the core idea · the recipe in steps · why it matters for you · verified links.</p>
+</div>
+
+<section class="block">
+  <div class="grp">A · Brain-stimulus synthesis (the direct lineage of your project)</div>
+
+  <div class="paper">
+    <h5>BrainDiVE <span class="venue">— Luo et&nbsp;al., NeurIPS 2023 (Oral)</span></h5>
+    <div class="row"><span class="lab">What</span><span>Gradient-guide SD 2.1 with a CLIP→voxel encoder to synthesize images that maximally drive an ROI. This is exactly your current pipeline.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>\( g_t=\nabla_{z_t}\sum_{v\in V} f_v\big(D(\hat x_0)\big) \) plus SAG sharpening — i.e. eq. (7)–(8).</span></div>
+    <ol><li>Fit a linear readout on frozen OpenCLIP ViT-B/16 features → voxels.</li><li>Each denoising step: decode \(\hat x_0\), backprop ROI activation into the latent.</li><li>Add SAG (0.75), scale 130, empty prompt.</li></ol>
+    <div class="row"><span class="lab">For you</span><span>High \(\alpha\) <i>because</i> the encoder is CLIP. Swapping in DINOv2 is what broke it (Part I).</span></div>
+    <div class="row links"><a href="https://github.com/aluo-x/BrainDiVE" target="_blank" rel="noopener">code</a><a href="https://proceedings.neurips.cc/paper_files/paper/2023/hash/ef0c0a23a1a8219c4fc381614664df3e-Abstract-Conference.html" target="_blank" rel="noopener">NeurIPS proceedings</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>BrainSCUBA <span class="venue">— Luo et&nbsp;al., ICLR 2024</span></h5>
+    <div class="row"><span class="lab">What</span><span>Instead of synthesizing pixels, generate a <b>natural-language caption</b> of what a voxel prefers, by decoding into CLIP space and captioning with an LLM.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>voxel → CLIP embedding \(\hat e=\arg\max_e f(e)\) on the CLIP sphere → caption via a CLIP-conditioned LLM.</span></div>
+    <div class="row"><span class="lab">For you</span><span>A ready-made <b>concept-naming</b> primitive for your loop — and proof the "voxel → text" direction works.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2310.04420" target="_blank" rel="noopener">arXiv 2310.04420</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>Voxel-Weighted Activation Maximization <span class="venue">— Shinkle &amp; Lescroart, CVPR 2025 workshop</span></h5>
+    <div class="row"><span class="lab">What</span><span>The opposite extreme: <b>no generator.</b> Optimize raw pixels to maximize any weighted voxel set (DeepDream, pointed at cortex).</span></div>
+    <div class="row"><span class="lab">Idea</span><span>\( x^\star=\arg\max_x \sum_v w_v f_v(x) \), gradient ascent in pixels — no prior, so \(g_\perp\) is unconstrained.</span></div>
+    <div class="row"><span class="lab">For you</span><span>Shows the failure mode with <b>no manifold constraint</b>: results look like feature-visualizations, not photos — the \(\alpha\)→irrelevant-but-ugly baseline.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2506.04379" target="_blank" rel="noopener">arXiv 2506.04379</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>NEvo <span class="venue">— EPFL, 2026 &nbsp;·&nbsp; a VIDEO method (read the caveat)</span></h5>
+    <div class="row"><span class="lab">What</span><span><i>Neural-Guided Evolutionary <b>Video</b> Synthesis.</i> Not an image tool (V-JEPA&nbsp;2 encoder + SDXL-Turbo/LTX-Video) — take it as a <b>principle</b>, not a drop-in.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>Abandons pixel-gradient guidance (reports BrainDiVE "fails to generate meaningful stimuli" in the dynamic setting); runs <b>evolutionary search over a prompt space</b>, using the encoder only as a <b>black-box score</b>.</span></div>
+    <div class="row"><span class="lab">For you</span><span>The clean escape hatch: <b>never backprop the encoder</b> → the \(\alpha\) mismatch vanishes, and any encoder (your DINOv2) works. Backbone of Path B in Part IV.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2607.02317" target="_blank" rel="noopener">arXiv 2607.02317</a><a href="https://huggingface.co/epfl-neuroai/NEvo" target="_blank" rel="noopener">HF pipeline</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>BrainTrace / BrainTRACE <span class="venue">— Golbari et&nbsp;al., 2026</span></h5>
+    <div class="row"><span class="lab">What</span><span>Automated <b>causal</b> testing of visual concepts in cortex via generative counterfactuals — essentially your loop, run in the <i>inverse</i> (concept→region) direction.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>concept \(c\) is causal for voxel \(v\) iff \(a_v(x_{\text{pos}}) > a_v(x_{\text{cf}})\) <b>and</b> \(a_v(x_{\text{pos}}) > a_v(x_{\text{distractor}})\).</span></div>
+    <ol><li>Generate concept images with FLUX; a VLM (Qwen-VL) verifies the concept is present.</li><li>FLUX-edit a <b>counterfactual</b> that removes the concept, VLM verifies removal.</li><li>Score all through an image→fMRI encoder; keep only voxels that pass the three-way test. False positives ~70% → ~23%.</li></ol>
+    <div class="row"><span class="lab">For you</span><span>Validated proof your "generate → edit → check activation drop" logic is sound. <span class="novel">Your novelty = the open-ended, voxel-first, recursive-decomposition direction they don't automate.</span></span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2605.23895" target="_blank" rel="noopener">arXiv 2605.23895</a><a href="https://yuvalgol123.github.io/BrainTrace/" target="_blank" rel="noopener">project page</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>BrainCLIP <span class="venue">— Liu et&nbsp;al., 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>Maps fMRI into the <b>CLIP embedding space</b> with visual+textual supervision — a brain encoder that natively lives in CLIP geometry.</span></div>
+    <div class="row"><span class="lab">For you</span><span>The "use the brain-CLIP" option: if your readout targets CLIP space, its gradient is renderable by SD by construction (high \(\alpha\)) <i>and</i> it plugs straight into captioning.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2302.12971" target="_blank" rel="noopener">arXiv 2302.12971</a></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="grp">B · The guidance machinery (the general theory behind BrainDiVE)</div>
+
+  <div class="paper">
+    <h5>Classifier &amp; classifier-free guidance <span class="venue">— Dhariwal &amp; Nichol 2021; Ho &amp; Salimans 2022</span></h5>
+    <div class="row"><span class="lab">What</span><span>The origin of eq.&nbsp;(6): steer sampling with a classifier gradient (CG), or bake the conditional/unconditional split into training (CFG). BrainDiVE is CG with an ROI "classifier".</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2105.05233" target="_blank" rel="noopener">CG · 2105.05233</a><a href="https://arxiv.org/abs/2207.12598" target="_blank" rel="noopener">CFG · 2207.12598</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>DPS — Diffusion Posterior Sampling <span class="venue">— Chung et&nbsp;al., ICLR 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>The general recipe for guiding with <i>any</i> differentiable objective evaluated on \(\hat x_0\) — the formal parent of BrainDiVE's step: \(x_{t-1}\leftarrow x'_{t-1}+\zeta\,\nabla_{x_t} r(\hat x_0(x_t))\).</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2209.14687" target="_blank" rel="noopener">arXiv 2209.14687</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>FreeDoM <span class="venue">— Yu et&nbsp;al., ICCV 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>Training-free energy guidance + the <b>time-travel / resampling</b> trick that heals off-manifold damage.</span></div>
+    <div class="row"><span class="lab">For you</span><span>The single biggest quality win to bolt onto your current gradient pipeline before touching anything else.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2303.09833" target="_blank" rel="noopener">arXiv 2303.09833</a><a href="https://github.com/vvictoryuki/freedom" target="_blank" rel="noopener">code</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>Universal Guidance <span class="venue">— Bansal et&nbsp;al., 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>Forward + <b>backward</b> guidance (inner optimization steps on \(\hat x_0\)) so guidance actually hits the target per step, with any off-the-shelf predictor.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2302.07121" target="_blank" rel="noopener">arXiv 2302.07121</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>MCG &amp; MPGD — manifold-constrained / manifold-preserving guidance <span class="venue">— Chung 2022 (NeurIPS); He 2024 (ICLR)</span></h5>
+    <div class="row"><span class="lab">What</span><span>Name your exact problem and fix it: project the gradient onto the data manifold so guidance never pushes into "impossible image" directions — i.e. keep only \(P_{\mathcal M} g\).</span></div>
+    <div class="row"><span class="lab">For you</span><span>The principled cure for a low-\(\alpha\) encoder without any training.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2206.00941" target="_blank" rel="noopener">MCG · 2206.00941</a><a href="https://arxiv.org/abs/2311.16424" target="_blank" rel="noopener">MPGD · 2311.16424</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>TFG — Unified Training-Free Guidance <span class="venue">— Ye et&nbsp;al., NeurIPS 2024 (Spotlight)</span></h5>
+    <div class="row"><span class="lab">What</span><span>Shows FreeDoM / Universal Guidance / DPS are one framework with a few knobs (strength, #recurrences, #resamples). BrainDiVE is a special case.</span></div>
+    <div class="row"><span class="lab">Verdict</span><span>Its honest finding: these methods "often <b>lack theoretical grounding</b>" and rigorous benchmarking → <b>the whole gradient family is finicky by nature</b>, not just your setup.</span></div>
+    <div class="row links"><a href="https://neurips.cc/virtual/2024/poster/95462" target="_blank" rel="noopener">NeurIPS 2024</a><a href="https://github.com/YWolfeee/Training-Free-Guidance" target="_blank" rel="noopener">code</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>Rectified-CFG++ &amp; CFG-MP <span class="venue">— 2025 / ICML 2026</span></h5>
+    <div class="row"><span class="lab">What</span><span>Fixes for the flow-matching drift caveat above: predictor-corrector guidance and homotopy manifold-projection that keep FLUX samples near the transport path.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2510.07631" target="_blank" rel="noopener">Rectified-CFG++ · 2510.07631</a><a href="https://arxiv.org/abs/2601.21892" target="_blank" rel="noopener">CFG-MP · 2601.21892</a></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="grp">C · Fixing the mismatch by training (if you insist on gradients)</div>
+
+  <div class="paper">
+    <h5>Perceptually-aligned gradients / robust-classifier synthesis <span class="venue">— Santurkar &amp; Engstrom et&nbsp;al., 2019</span></h5>
+    <div class="row"><span class="lab">What</span><span><b>Adversarially-robust models have gradients that look like real image edits.</b> Robustifying an encoder <i>raises</i> its \(\alpha\) — you change how <code>f</code> is steered, not what it predicts.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>\( \min_w \mathbb{E}_x \max_{\lVert\delta\rVert\le\epsilon}\ell(f_w(x+\delta),\text{target}) \Rightarrow \nabla_x f_w \) perceptually aligned.</span></div>
+    <div class="row"><span class="lab">For you</span><span>Cheap fine-tune (LoRA/linear-probe + PGD, or a Jacobian-smoothness penalty) that <b>keeps DINOv2</b> and makes it steerable.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/1906.09453" target="_blank" rel="noopener">robust synthesis · 1906.09453</a><a href="https://arxiv.org/abs/1910.08640" target="_blank" rel="noopener">PAG · 1910.08640</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>Textual Inversion &amp; IP-Adapter <span class="venue">— Gal et&nbsp;al. 2022; Ye et&nbsp;al. 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>Turn a target into <b>conditioning</b> instead of a gradient. Learn a small map ROI → CLIP embedding, then use SD's normal conditioning path — on-manifold by construction, so \(\alpha\) stops mattering.</span></div>
+    <div class="row"><span class="lab">Idea</span><span>\( c = A_\varphi(\text{ROI}) \in \text{CLIP-space};\quad x\sim p_\theta(x\mid c) \).</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2208.01618" target="_blank" rel="noopener">Textual Inversion · 2208.01618</a><a href="https://arxiv.org/abs/2308.06721" target="_blank" rel="noopener">IP-Adapter · 2308.06721</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>Reward fine-tuning: DRaFT, DDPO, DPOK <span class="venue">— 2023</span></h5>
+    <div class="row"><span class="lab">What</span><span>Teach SD (via LoRA) to <b>natively</b> produce high-ROI images. <b>DRaFT</b> backprops the reward through sampling (differentiable). <b>DDPO/DPOK</b> use RL — <code>r</code> as a black-box scalar, <b>no encoder gradient at all</b>, so the mismatch vanishes.</span></div>
+    <div class="row"><span class="lab">For you</span><span>The robust modern answer if you'll generate <b>many</b> images per ROI. RL flavor = same insight as NEvo (encoder used only as a score).</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2309.17400" target="_blank" rel="noopener">DRaFT · 2309.17400</a><a href="https://arxiv.org/abs/2305.13301" target="_blank" rel="noopener">DDPO · 2305.13301</a><a href="https://arxiv.org/abs/2305.16381" target="_blank" rel="noopener">DPOK · 2305.16381</a></div>
+  </div>
+</section>
+
+<!-- ============ PART IV ============ -->
+<div class="part" id="build">
+  <h2>Part IV</h2>
+  <h3>A build plan for your paper</h3>
+  <p class="lede" style="margin-top:6px">Give a voxel set → generate an image → let a vision model name what it sees → edit the image to remove that thing → check if activation drops → iterate, decomposing the concept when it's too coarse. <b>Yes, it makes sense</b> — it's BrainTrace's validated logic, run in the harder, open-ended, voxel-first direction that is your contribution.</p>
+</div>
+
+<section class="block">
+  <h4>The core loop (and its one real measurement)</h4>
+  <div class="derive">
+    <div class="drow"><span class="dlab q">Motivation</span><span class="dtext">To claim "concept \(c\) drives voxel set \(V\)," you need a number that says removing \(c\) actually lowers the predicted activation.</span></div>
+    <div class="drow"><span class="dlab a">Approach</span><span class="dtext">Measure the <b>activation drop</b> between an image and its concept-removed counterfactual.</span></div>
+    <div class="eqwrap"><span>\[ \Delta_c \;=\; a_V(x_{\text{pos}})-a_V(x_{\text{cf}}), \qquad a_V(x)=\frac{1}{|V|}\sum_{v\in V} f_v(x) \]</span><span class="num">(9)</span></div>
+    <div class="drow"><span class="dlab o">Outcome</span><span class="dtext">Large \(\Delta_c\) that survives a distractor guard ⇒ \(c\) is causal. Small \(\Delta_c\) ⇒ \(c\) is too coarse or wrong ⇒ <b>decompose and recurse</b>.</span></div>
+  </div>
+  <p class="defs">\(x_{\text{cf}}\) = a counterfactual edit of \(x_{\text{pos}}\) that removes concept \(c\) but preserves everything else.</p>
+
+  <ol class="steps">
+    <li><b>Encoder first — it <i>is</i> the experiment.</b> Your causal test is only as trustworthy as <code>f</code>. Start from a CLIP-based readout (well-behaved, high \(\alpha\), doubles as a captioner via <a href="#papers">BrainSCUBA/BrainCLIP</a>). Validate <code>f</code> on held-out NSD before trusting any \(\Delta\).</li>
+    <li><b>Generate top-activating images for \(V\).</b> Pick a path (below). Output: a handful of high-\(a_V\) images that agree with each other.</li>
+    <li><b>Name what you see — VLM captioning.</b> Run Qwen-VL / Gemini on the top images → open-ended candidate concepts \(\{c_1,c_2,\dots\}\). No a-priori concept list needed.</li>
+    <li><b>Ablate — counterfactual edit.</b> FLUX-edit each image to remove \(c_i\) ("minimally modify so it no longer expresses \(c_i\)"); a VLM verifies removal. Also build a semantic-negative for the three-way guard.</li>
+    <li><b>Measure the drop (eq. 9).</b> Re-score with <code>f</code>. Large \(\Delta_{c_i}\) → causal concept found. Small → go to 6.</li>
+    <li><b><span class="novel">Decompose &amp; recurse (your novel piece).</span></b> When no single concept drops activation enough, ask the VLM to split the coarse concept into sub-concepts and repeat 3–5 on each. This recursive, open-ended search is what BrainTrace does <i>not</i> automate.</li>
+  </ol>
+</section>
+
+<section class="block">
+  <h4>Three paths for Step 2 (how to generate) — pick by your constraints</h4>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>Path</th><th>How</th><th>Deals with \(\alpha\)-mismatch by…</th><th>Cost / trade-off</th></tr></thead>
+    <tbody>
+      <tr><td><b>A · gradient + CLIP</b></td><td>BrainDiVE as-is, but only with a <b>CLIP</b>-space encoder; add FreeDoM resampling + MPGD projection + normalized step (eq. 8).</td><td>keeping \(\alpha\) high (CLIP) and projecting off \(g_\perp\)</td><td>fastest to stand up; still gradient-fragile; encoder must be CLIP-shaped</td></tr>
+      <tr><td><b>B · search + VLM</b> <span class="tag rec">recommended</span></td><td>NEvo-style: LLM proposes prompts → generate with FLUX → score top-k with <code>f</code>. Encoder used only as a <b>score</b>.</td><td><b>eliminating it</b> — no encoder gradient ever</td><td>robust; <b>any</b> encoder works (your DINOv2!); gives a text description for free → feeds Step 3; more inference compute</td></tr>
+      <tr><td><b>C · reward-FT</b></td><td>DDPO/DPOK (RL, black-box <code>r</code>) or DRaFT (differentiable) to fine-tune SD to your ROI reward, then sample cheaply.</td><td>generator <i>learns</i> the reward once</td><td>best per-image quality at scale; upfront training; RL flavor also dodges the gradient entirely</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout good"><b>Recommendation.</b> Build the loop on <b>Path B</b> — it makes the \(\alpha\) mismatch irrelevant (your universal encoder is fine as a <i>scorer</i>), and the prompt/caption it produces plugs straight into Steps 3–6. Keep <b>Path A</b> only as a CLIP-encoder baseline for the paper's comparison, and reach for <b>Path C</b> if you need to mass-produce clean images per ROI. The scientific value is the <b>trustworthy encoder + robust generate/edit/verify loop</b>, not perfecting pixel-gradient guidance.</div>
+  <div class="pathnote">Your reproduction assets (the original-BrainDiVE S1 panel and 25 guided images) live at <code>BrainDiVE/repro/</code> — a ready Path-A CLIP baseline to compare against.</div>
+</section>
+
+<!-- ============ SURVEY FRAMING ============ -->
+<div class="part" id="survey">
+  <h2>Parts V &amp; VI · a two-area survey</h2>
+  <h3>Two different problems, side by side</h3>
+</div>
+<section class="block">
+  <p>You correctly diagnosed the situation, so let's name the two problems cleanly — they are <b>not the same</b>, and they have different cures. Everything below (Parts V &amp; VI) is a survey of both.</p>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>&nbsp;</th><th>Area A — the CLIP encoder</th><th>Area B — your DINOv2 encoder</th></tr></thead>
+    <tbody>
+      <tr><td><b>The problem</b></td><td>Baseline <b>finickiness</b>: even a CLIP gradient is adversarial-prone because CLIP was never trained on <i>noisy</i> images.</td><td>A <b>feature-space mismatch</b>: SD's UNet only speaks CLIP, so your DINOv2 gradient points <i>off-manifold</i> (low \(\alpha\), Part I) → texture.</td></tr>
+      <tr><td><b>How bad</b></td><td>Fixable to good quality with the right hygiene.</td><td>Worse, and <b>gradient hygiene alone can't fully close it</b> — \(\alpha\) is a hard ceiling.</td></tr>
+      <tr><td><b>Who has it</b></td><td>Everyone doing gradient guidance (incl. BrainDiVE).</td><td>Anyone using a <b>non-CLIP</b> encoder (you).</td></tr>
+      <tr><td><b>Cured in</b></td><td><a href="#fix">Part V</a> — encoder-agnostic fix-stack.</td><td><a href="#dino">Part VI</a> — mismatch-specific fixes.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout key"><b>Your instinct was right.</b> "My DINO model doesn't work well because it's not CLIP-based, and the diffusion model's guidance is CLIP-based" — <b>yes, that's the dominant issue</b> (Area B). The nuance: <i>on top of</i> that mismatch sits a second, milder problem that afflicts <b>all</b> raw-gradient guidance including CLIP (Area A). Part V's tricks are encoder-agnostic and raise the floor for DINOv2 too — but to actually close your gap you need Part VI. <b>Read Part V first (the shared foundation), then Part VI (your specific fix).</b></div>
+</section>
+
+<!-- ============ PART V ============ -->
+<div class="part" id="fix">
+  <h2>Part V · Area A</h2>
+  <h3>Taming CLIP-shaped gradient-guidance (the fix-stack)</h3>
+  <p class="lede" style="margin-top:6px">The <i>encoder-agnostic</i> foundation. These make <b>any</b> gradient-guidance cleaner — necessary for CLIP, and they raise the floor for your DINOv2 too, but they can't by themselves fix the manifold mismatch (that's Part VI). CLIP-gradient guidance is a <i>known-finicky</i> method (provably prone to adversarial gradients — <a href="https://arxiv.org/abs/2403.12404" target="_blank" rel="noopener">Shen et&nbsp;al., NeurIPS 2024</a>), but there is a standard, battle-tested <b>fix-stack</b> from the CLIP-guided-diffusion lineage (Crowson / Disco Diffusion) plus the guidance-theory papers. Below, in priority order (biggest win first).</p>
+</div>
+
+<section class="block">
+  <div class="callout key"><b>Root cause, one line.</b> Off-the-shelf CLIP was trained on <i>clean</i> images, so a single full-image CLIP gradient is <b>trivially satisfiable by high-frequency texture</b> that spikes the score without looking like anything. Every fix does one of two things: <b>(a) de-adversarialize the gradient</b> (make it agree across crops/augmentations so only coherent semantic signal survives), or <b>(b) pull the sample back onto the manifold</b> (projection / re-noising / regularizers).</div>
+
+  <h4>The fix-stack, in priority order</h4>
+  <ol class="steps">
+    <li><b>Cutouts — augmentation-averaged CLIP gradient (biggest single win).</b> Crop \(N\) random patches (random size &amp; position), resize each to 224, embed all, average the loss, backprop that. Averaging over crops <b>cancels per-pixel adversarial directions</b> (they don't agree across crops) and keeps only spatially-coherent semantic signal. Typical: \(N=16\) (Disco pushes 30–64), \(\text{cut\_pow}=1.0\), accumulate over 2 batches. <span class="defs" style="display:inline">Source: <a href="https://github.com/nerdyrodent/CLIP-Guided-Diffusion" target="_blank" rel="noopener">nerdyrodent</a>.</span>
+      <div class="eqwrap"><span>\[ g=\frac{1}{N}\sum_{i=1}^{N}\nabla_x\,\ell\big(\mathrm{CLIP}(\mathrm{crop}_i(\hat x_0)),\,\text{target}\big) \]</span><span class="num">(10)</span></div>
+    </li>
+    <li><b>Guide on the clean estimate \(\hat x_0\), never on \(x_t\).</b> Compute the Tweedie predicted-\(x_0\) (eq. 5), feed <i>that</i> to CLIP. CLIP on a noisy \(x_t\) is out-of-distribution → meaningless/adversarial gradient. (BrainDiVE already does this.) <span class="defs" style="display:inline">Universal across FreeDoM / MPGD / Crowson.</span></li>
+    <li><b>Spherical-distance loss, not raw cosine.</b> Normalize both embeddings and use the squared great-circle distance on the unit sphere — well-behaved near the optimum where cosine flattens. <span class="defs" style="display:inline">Source: Crowson / nerdyrodent.</span>
+      <div class="eqwrap"><span>\[ \ell_{\text{sph}}(a,b)=2\Big(\arcsin\tfrac{\lVert\hat a-\hat b\rVert}{2}\Big)^{2}, \qquad \hat a=a/\lVert a\rVert \]</span><span class="num">(11)</span></div>
+    </li>
+    <li><b>Adaptive (noise-norm) step size — the finicky-killer.</b> Scale each guidance step by the model's own score magnitude so guidance <i>nudges</i> rather than overwhelms (also fixes slow convergence). The principled version of eq. 8. <span class="defs" style="display:inline">Source: <a href="https://arxiv.org/abs/2403.12404" target="_blank" rel="noopener">Shen et&nbsp;al., NeurIPS 2024</a>.</span>
+      <div class="eqwrap"><span>\[ \lambda_t=\eta\cdot\frac{\lVert\varepsilon_\theta(x_t,t)\rVert}{\lVert g_t\rVert^{2}} \]</span><span class="num">(12)</span></div>
+    </li>
+    <li><b>Guide only in the "semantic" window; warm up, then turn off.</b> FreeDoM's three stages: <b>chaotic</b> (early — too noisy, skip), <b>semantic</b> (middle — content is decided, guide strongly), <b>refinement</b> (late — guidance only injects texture, reduce/skip). <span class="defs" style="display:inline">Source: <a href="https://arxiv.org/abs/2303.09833" target="_blank" rel="noopener">FreeDoM</a>.</span></li>
+    <li><b>Time-travel / resampling.</b> In the semantic window, after stepping \(t\to t{-}1\), re-noise back one step and re-denoise, repeating \(r\approx 2\text{–}10\) times. The prior re-absorbs off-manifold kicks. <span class="defs" style="display:inline">Source: <a href="https://arxiv.org/abs/2303.09833" target="_blank" rel="noopener">FreeDoM</a>.</span></li>
+    <li><b>Manifold projection (MPGD / MCG).</b> Project the guidance gradient onto the manifold's tangent space (via the VAE or the model's own \(x_0\)-prediction) so no update leaves the learned image manifold. No training. <span class="defs" style="display:inline">Source: <a href="https://arxiv.org/abs/2311.16424" target="_blank" rel="noopener">MPGD</a>.</span></li>
+    <li><b>Cheap on-manifold regularizers.</b> <b>TV loss</b> (penalize adjacent-pixel differences, \(\text{tv}\approx150\)) kills checkerboard texture; <b>range loss</b> \(\lVert x-\mathrm{clamp}(x,-1,1)\rVert^2\) (\(\approx50\)) stops blown-out contrast. <span class="defs" style="display:inline">Source: nerdyrodent.</span></li>
+    <li><b>Keep Self-Attention Guidance (SAG).</b> Sharpens structure at moderate scale. BrainDiVE uses \(\text{sag}=0.75\). <span class="defs" style="display:inline">Source: <a href="https://arxiv.org/abs/2210.00939" target="_blank" rel="noopener">SAG</a>.</span></li>
+  </ol>
+
+  <div class="callout warn"><b>Don't just crank the scale.</b> Classifier-guidance theory (<a href="https://arxiv.org/abs/2105.05233" target="_blank" rel="noopener">Dhariwal &amp; Nichol</a>): too-small = unclear samples, too-large = "patch-boundary artifacts / exaggerated contrast." Sweep, and <b>back off at the first sign of texture</b>.</div>
+
+  <div class="pathnote"><b>BrainDiVE's own recipe</b> (verified): SD&nbsp;2.1-base, 512², empty prompt, 50 steps (DPM-Solver++), <b>SAG 0.75</b>, encoder guidance scale \(\gamma=130\) (repo note: a bug cut effective scale ~10–20%, so use ~100 for OpenCLIP ViT-B, ~150 for EVA02-CLIP), guidance on the predicted-\(x_0\) resized to 224. It ships <i>without</i> cutouts/TV/time-travel — exactly the headroom this fix-stack gives you.</div>
+</section>
+
+<!-- ============ PART VI ============ -->
+<div class="part" id="dino">
+  <h2>Part VI · Area B</h2>
+  <h3>Making guidance work for your DINOv2 universal encoder</h3>
+  <p class="lede" style="margin-top:6px">This is <i>your</i> problem. Your universal brain-encoder reads voxels off frozen <b>DINOv2</b> features; SD's UNet only ever learned to obey <b>CLIP</b>-shaped conditioning; so backpropping your DINOv2 objective pushes the latent <b>off-manifold</b> (low \(\alpha\), <a href="#why">Part I</a>) → adversarial texture. Below is the full menu, ordered by the axis that matters to you — <b>how much you have to touch the generator</b> — and filtered to your stated budget: <b>light fine-tune OK (small adapter / LoRA), don't retrain the SD backbone.</b> Each card is tagged by <i>how</i> it beats the mismatch: <span class="tag" style="background:var(--good);color:#04120c">S = score only</span> <span class="tag" style="background:var(--accent)">R = realign gradient</span> <span class="tag" style="background:var(--warn);color:#241400">C = condition natively</span> <span class="tag" style="background:var(--bad)">G = retrain generator</span>.</p>
+</div>
+
+<section class="block">
+  <div class="callout key"><b>The key realization.</b> There are only four ways out of a low-\(\alpha\) encoder: <b>(S)</b> stop using its gradient and use it as a <i>score</i>; <b>(R)</b> make its gradient on-manifold (robustify it, or route through the generator's own features); <b>(C)</b> convert its target into SD's native CLIP conditioning; or <b>(G)</b> retrain the generator to speak DINOv2. Your "light fine-tune, keep SD frozen" budget rules out <b>G</b> as a main plan — so the live options are <b>S, R, and C</b>, shown first.</div>
+
+  <div class="grp">Fits your budget — keep SD frozen, train at most an adapter / LoRA</div>
+
+  <div class="paper">
+    <h5>1 · Use DINOv2 as a <i>score</i>, not a gradient — RL reward fine-tuning (DDPO / DPOK) <span class="venue">— Black et&nbsp;al. 2023; Fan et&nbsp;al., NeurIPS 2023</span> <span class="tag rec">top pick</span> <span class="tag" style="background:var(--good);color:#04120c">S</span></h5>
+    <div class="row"><span class="lab">TL;DR</span><span>Never differentiate the encoder. Let SD <i>learn by trial and reward</i> to make images your voxels like, using your brain-encoder purely as a scalar scorekeeper.</span></div>
+
+    <h6>How it works — the logic</h6>
+    <p>A diffusion sampler is a sequence of \(T\) denoising steps. DDPO reframes that sequence as a <b>Markov decision process</b>: the <b>state</b> is the pair \((x_t,t)\), the <b>action</b> is the next latent \(x_{t-1}\) drawn from the policy \(p_\theta(x_{t-1}\mid x_t)\) (= your SD model with trainable LoRA weights \(\theta\)), and the <b>reward is paid only at the end</b> — once, on the finished image \(x_0\):</p>
+    <div class="eqwrap"><span>\[ R(x_0)=a_V(x_0)=\frac{1}{|V|}\sum_{v\in V} f_v(x_0) \quad\text{(your DINOv2 brain-encoder, frozen)} \]</span></div>
+    <p>Policy-gradient (REINFORCE / PPO) then nudges \(\theta\) so that <i>trajectories which ended in a high-reward image become more likely</i>. The gradient it actually uses is the score-function estimator — notice the reward appears as a plain multiplicative <b>number</b>, and the only thing differentiated is the model's own log-probability of its actions:</p>
+    <div class="eqwrap"><span>\[ \nabla_\theta J=\mathbb{E}\!\left[\sum_{t} \big(R(x_0)-b\big)\,\nabla_\theta \log p_\theta(x_{t-1}\mid x_t)\right]-\beta\,\mathrm{KL}\!\big(p_\theta \Vert p_{\text{base}}\big) \]</span></div>
+    <p>\(b\) is a baseline (the batch-mean reward) that reduces variance; the \(\mathrm{KL}\) term (or, in practice, PPO's clip) tethers the fine-tuned policy to the <b>frozen base SD</b> so it can't wander off the natural-image manifold to chase reward.</p>
+
+    <h6>Why it kills the \(\alpha\) mismatch entirely</h6>
+    <p>The whole problem in Part I was that \(\nabla_x f\) points off-manifold. Here <b>\(\nabla_x f\) is never computed</b> — the encoder only ever emits a scalar \(R\). So its gradient geometry, its "adversarial" directions, its low \(\alpha\): all irrelevant. Meanwhile the generator being optimized is the <i>same</i> SD that already knows what real images look like, and the KL leash keeps it there. That's why RL is the one option that makes your exact problem structurally vanish rather than merely dampening it.</p>
+
+    <h6>Recipe — how to actually do it</h6>
+    <ol class="steps">
+      <li><b>Wrap generation to log action probabilities.</b> Sample images with SD 2.1 + current LoRA using a <b>DDIM/ancestral sampler whose per-step transition is a known Gaussian</b>, so \(\log p_\theta(x_{t-1}\mid x_t)\) is analytic and differentiable in \(\theta\). Store the trajectory and its step log-probs. (Start from <code>ddpo-pytorch</code> or 🤗 TRL's <code>DDPOTrainer</code> and just replace the reward function.)</li>
+      <li><b>Score with your encoder.</b> Run each finished \(x_0\) through the <b>frozen</b> DINOv2 brain-encoder → \(R=a_V(x_0)\). This is the <i>only</i> place your encoder is used.</li>
+      <li><b>Turn rewards into advantages.</b> Within each batch (ideally per-ROI), <b>standardize</b>: \(A=(R-\text{mean})/\text{std}\). This per-group normalization is the single trick that makes DDPO stable — it removes the need to know the reward's scale.</li>
+      <li><b>PPO update on LoRA only.</b> Maximize \(\sum_t A\cdot\log p_\theta\) with the importance ratio clipped to \([1-\epsilon,1+\epsilon]\) (lets you take a few gradient epochs per batch of samples). Train a small <b>LoRA (rank 4–16) on the UNet attention projections</b>; SD backbone <i>and</i> your encoder stay frozen.</li>
+      <li><b>Loop.</b> sample → score → advantage → update, a few hundred images per round. Track mean reward (should climb) and KL-to-base (should stay bounded).</li>
+      <li><b>One LoRA per ROI</b> is the clean design; to scale across ROIs, condition a single LoRA on an ROI-id embedding so they share capacity.</li>
+    </ol>
+
+    <h6>Key settings (sane starting points)</h6>
+    <ul>
+      <li>LoRA LR \(1\text{–}3\times10^{-4}\); rank 8; batch 64–256 images/round; inner PPO epochs 1–4; clip \(\epsilon\approx10^{-4}\text{–}10^{-2}\) (DDPO runs small).</li>
+      <li>Sampling: 30–50 DDIM steps; CFG can be <b>low or 0</b> (you're rewarding directly, not prompting).</li>
+      <li>KL weight \(\beta\): tune upward the moment images start looking "off" — it's your realism dial.</li>
+    </ul>
+
+    <h6>Pitfalls &amp; how to dodge them</h6>
+    <ul>
+      <li><span class="watch">Reward hacking.</span> Your encoder is an imperfect reward; with a weak leash SD will find weird images that spike \(a_V\) without being meaningful. Defenses: stronger KL, lower LR, a small auxiliary realism reward, and a VLM/human spot-check each round.</li>
+      <li><span class="watch">Single-encoder overfit.</span> It may hack <i>your</i> encoder specifically. Hold out a <b>second, independently-trained encoder</b> and require it to also rate the images high — this is your honesty check (and doubles as evidence for the paper).</li>
+      <li><span class="watch">Sample cost.</span> RL burns generations; budget GPU time. DDPO is markedly more sample-efficient than DPOK — prefer it.</li>
+    </ul>
+
+    <h6><span class="win">You'll know it worked when</span></h6>
+    <p>Mean \(a_V\) of sampled images rises steadily, KL-to-base stays bounded (images still look natural), and the <b>held-out</b> encoder agrees the images are high-activating. At that point you have an SD that natively mass-produces top-ROI images — cheap to sample from thereafter.</p>
+
+    <div class="row links"><a href="https://arxiv.org/abs/2305.13301" target="_blank" rel="noopener">DDPO · 2305.13301</a><a href="https://github.com/kvablack/ddpo-pytorch" target="_blank" rel="noopener">ddpo-pytorch</a><a href="https://proceedings.neurips.cc/paper_files/paper/2023/file/fc65fab891d83433bd3c8d966edde311-Paper-Conference.pdf" target="_blank" rel="noopener">DPOK · NeurIPS 2023</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>2 · Robustify the encoder — perceptually-aligned gradients <span class="venue">— Santurkar 2019; Kawar/Ganz/Elad, TMLR 2022</span> <span class="tag rec">keeps your exact pipeline</span> <span class="tag" style="background:var(--accent)">R</span></h5>
+    <div class="row"><span class="lab">TL;DR</span><span>Keep the BrainDiVE gradient pipeline exactly as-is, but first <b>smooth your encoder's input-gradient</b> by adversarial fine-tuning, so \(\nabla_x f\) points at real image edits instead of static.</span></div>
+
+    <h6>How it works — the logic</h6>
+    <p>Why is \(\nabla_x f\) adversarial in the first place? Because a standard network has a <b>jagged</b> loss surface in pixel space: a tiny, high-frequency change to the input can swing its features enormously. So the direction of steepest ascent is a high-frequency pattern — off-manifold noise. <b>Adversarial (\(\ell_2\)) training</b> flattens that surface: you force the encoder to give the <i>same</i> answer for every image inside a small ball \(\lVert\delta\rVert_2\le\epsilon\), which forbids it from relying on high-frequency cues. A network that is invariant to small perturbations has, as a mathematical consequence, an input-gradient that is <b>low-frequency and semantically meaningful</b> — the "perceptually-aligned gradients" phenomenon. In our language: robust training <i>raises \(\alpha\)</i>.</p>
+    <div class="eqwrap"><span>\[ \min_{w}\ \mathbb{E}_x \max_{\lVert\delta\rVert_2\le\epsilon}\ \ell\big(f_w(x+\delta),\,\text{voxels}(x)\big)\ \Longrightarrow\ \nabla_x f_w \text{ perceptually aligned} \]</span></div>
+    <p>You change <i>how the encoder is steered</i>, not <i>what it predicts</i> — with a modest \(\epsilon\), voxel-prediction accuracy is roughly preserved, so your causal test stays trustworthy.</p>
+
+    <h6>Recipe — how to actually do it</h6>
+    <ol class="steps">
+      <li><b>Decide what to robustify (cheapest first).</b> Full DINOv2 adversarial training is expensive; instead put a <b>LoRA on DINOv2's last few blocks + your read-out head</b> and robustify only those. That's enough to reshape the gradient your pipeline sees.</li>
+      <li><b>Inner loop — craft the adversary.</b> For each training image \(x\), run <b>PGD</b>: 5–7 steps of \(\delta \leftarrow \Pi_{\lVert\delta\rVert_2\le\epsilon}\big(\delta + \tfrac{\epsilon}{4}\,\tfrac{\nabla_\delta \ell}{\lVert\nabla_\delta \ell\rVert}\big)\), maximizing your voxel-regression loss.</li>
+      <li><b>Outer loop — train for invariance.</b> Update \(w\) to minimize the loss on the perturbed \(x+\delta\), using your normal NSD image→voxel objective. Repeat over the dataset.</li>
+      <li><b>(Cheaper surrogate.)</b> If PGD is too slow, add a <b>gradient-norm / Jacobian penalty</b> \(\lambda\lVert\nabla_x f_w\rVert^2\) to the ordinary training loss — a first-order approximation that also smooths gradients, at ~2× cost.</li>
+      <li><b>Re-run BrainDiVE guidance</b> with the robustified encoder, plus the Part V hygiene (cutouts, adaptive step, time-travel).</li>
+    </ol>
+
+    <h6>Key settings</h6>
+    <ul>
+      <li><b>\(\epsilon\) is the master knob:</b> \(\ell_2\ \epsilon\approx 0.5\text{–}3\) on normalized pixels. Larger \(\epsilon\) → more perceptually-aligned gradients but more accuracy loss. Sweep it.</li>
+      <li>PGD steps 5–7, step size \(\epsilon/4\); small encoder LR (it's a fine-tune, not from scratch).</li>
+    </ul>
+
+    <h6>Pitfalls &amp; flags</h6>
+    <ul>
+      <li><span class="watch">Accuracy/robustness trade-off.</span> Too-large \(\epsilon\) tanks held-out voxel accuracy — and then your \(\Delta_c\) causal test is measuring a worse encoder. Watch clean accuracy every sweep point.</li>
+      <li><span class="watch">Research flag.</span> The two halves — "robust classifier ⇒ clean guidance" and "robust DINO ⇒ better perceptual metric" — are each published, but <b>nobody has published the exact composition</b> (robust DINOv2 → diffusion activation-max). Treat this as a well-motivated bet and verify visually.</li>
+    </ul>
+
+    <h6><span class="win">You'll know it worked when</span></h6>
+    <p>Three checks: (a) held-out voxel-prediction accuracy is roughly unchanged; (b) if you <b>visualize \(\nabla_x a_V\)</b> on a real photo, it now looks like a coherent edit (add/remove a recognizable thing) rather than TV static; (c) BrainDiVE-guided images become coherent.</p>
+
+    <div class="row links"><a href="https://arxiv.org/abs/1906.09453" target="_blank" rel="noopener">robust synthesis · 1906.09453</a><a href="https://arxiv.org/abs/2208.08664" target="_blank" rel="noopener">robust guidance · 2208.08664</a><a href="https://arxiv.org/abs/2502.11725" target="_blank" rel="noopener">robust CLIP/DINO metrics · 2502.11725</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>3 · Readout-head guidance — turn an off-manifold external gradient into an on-manifold internal one <span class="venue">— Luo et&nbsp;al., CVPR 2024 (Highlight)</span> <span class="tag" style="background:var(--accent)">R</span></h5>
+    <div class="row"><span class="lab">TL;DR</span><span>Keep gradient guidance, but change <b>what you differentiate</b>: teach a tiny head to read your voxel target off SD's <i>own</i> internal activations, then guide through that head. The gradient is on-manifold by construction.</span></div>
+
+    <h6>How it works — the logic</h6>
+    <p>The mismatch exists because the gradient comes from an <b>external</b> encoder whose feature space SD doesn't share. Flip the source. The diffusion UNet's own hidden activations \(\phi_t(x_t)\) are — by definition — features the generator can <i>move along</i>: nudging the latent to change \(\phi_t\) is exactly the kind of change SD renders cleanly. So if a small head \(h_\psi\) can predict your voxel target from those internal features, then guiding by \(\nabla h_\psi\) sends the latent along on-manifold directions. You've <b>separated concerns</b>: DINOv2 supplies the <i>labels</i> (what to look for) offline; the UNet's own representation supplies the <i>on-manifold carrier</i> at sampling time.</p>
+    <div class="eqwrap"><span>\[ \text{train}\ \ h_\psi\big(\phi_t(x_t),\,t\big)\approx a_V(x); \qquad\text{sample-time guidance}\ \ g_t=\nabla_{z_t}\,h_\psi\big(\phi_t(z_t),t\big) \]</span></div>
+
+    <h6>Recipe — how to actually do it</h6>
+    <ol class="steps">
+      <li><b>Build a labeled set.</b> Take a large image set and run your <b>frozen DINOv2 brain-encoder</b> to get \(a_V\) labels for each (or use real NSD activations). These labels are the only place DINOv2 enters.</li>
+      <li><b>Harvest UNet features across time.</b> For each image, run SD's forward (noising) process to many timesteps \(t\) and capture chosen intermediate activations \(\phi_t\) — the <b>mid-block</b> and a couple of up-block layers are the standard picks (Readout Guidance uses exactly this).</li>
+      <li><b>Train the heads.</b> Fit small conv/MLP heads \(h_\psi(\phi_t,t)\to a_V\) with an MSE loss, <b>UNet frozen</b>. Train across the full range of \(t\) so guidance has signal at every denoising step (a per-timestep or time-conditioned head).</li>
+      <li><b>Guide at sampling.</b> At each step, compute \(h_\psi(\phi_t(z_t),t)\), backprop to \(z_t\), and add \(\lambda_t\,\nabla_{z_t}h_\psi\) using the normalized step (eq. 8). Because the gradient flows <b>only through UNet features</b>, it stays on-manifold — combine with Part V hygiene for extra polish.</li>
+    </ol>
+
+    <h6>Key settings</h6>
+    <ul>
+      <li>Which layers: start with the UNet <b>mid-block</b>; add an up-block if the head under-fits.</li>
+      <li>Head: 2–3 layer MLP/conv, time-embedding-conditioned; cheap to train.</li>
+      <li>Guidance scale needs its own sweep — but it's far tamer than raw DINO because the direction is already renderable.</li>
+    </ul>
+
+    <h6>Pitfalls</h6>
+    <ul>
+      <li><span class="watch">Head fidelity is the ceiling.</span> If \(h_\psi\) can't predict \(a_V\) well from UNet features, guidance is weak. Check its held-out \(R^2\) before trusting the guided images.</li>
+      <li><span class="watch">Timestep coverage.</span> A head trained only at low-noise \(t\) gives no signal early in sampling — train across \(t\).</li>
+    </ul>
+
+    <h6><span class="win">You'll know it worked when</span></h6>
+    <p>The head predicts held-out \(a_V\) with decent \(R^2\), and guiding with it raises measured \(a_V\) while keeping images coherent — with none of the texture blow-ups the raw DINOv2 gradient produced.</p>
+
+    <div class="row links"><a href="https://arxiv.org/abs/2312.02150" target="_blank" rel="noopener">arXiv 2312.02150</a><a href="https://readout-guidance.github.io/" target="_blank" rel="noopener">project</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>4 · Condition natively — DINOv2→CLIP bridge + IP-Adapter / unCLIP <span class="venue">— Ye et&nbsp;al. 2023 (IP-Adapter)</span> <span class="tag" style="background:var(--warn);color:#241400">C</span></h5>
+    <div class="row"><span class="lab">TL;DR</span><span>Stop pushing a gradient through SD's back door. <b>Translate your DINO target into CLIP language</b> and hand it to SD's normal conditioning input — the door it was built to listen through.</span></div>
+
+    <h6>How it works — the logic</h6>
+    <p>SD only "hears" through CLIP-shaped conditioning (that's the whole reason for the mismatch). Gradient guidance fights this by shoving a signal in from outside; conditioning instead <b>uses the front door</b>. Two facts make it possible: (1) SD variants like <b>IP-Adapter</b> (a decoupled cross-attention branch for an <i>image</i> embedding) and <b>Stable-unCLIP</b> accept a CLIP <i>image</i> embedding as conditioning; (2) a small learned map can translate a DINOv2 embedding into that CLIP-image space. Chain them and SD receives your target in the exact format it was trained on — so there is <b>no inference-time gradient at all, nothing that can go adversarial</b>.</p>
+    <div class="eqwrap"><span>\[ \hat e_{\text{DINO}}=\arg\max_{e}\ (\text{read-out} \circ e)\ \ \text{on the DINO sphere};\quad c=B(\hat e_{\text{DINO}})\in\text{CLIP-space};\quad x\sim p_\theta(x\mid c) \]</span></div>
+
+    <h6>Recipe — how to actually do it</h6>
+    <ol class="steps">
+      <li><b>Get a DINO target for the ROI.</b> Either optimize an embedding \(\hat e_{\text{DINO}}\) to maximize your voxel read-out (a cheap optimization <i>in embedding space</i> — its "adversarialness" is harmless because you never render directly from it), or simply <b>average the DINO embeddings of the top real activating images</b>.</li>
+      <li><b>Learn the bridge \(B\): DINO→CLIP-image.</b> On a large image set, collect pairs \(\big(\text{DINO}(x),\ \text{CLIP}_{\text{img}}(x)\big)\) and fit a small MLP with a <b>cosine + MSE</b> loss. This is your one "light fine-tune."</li>
+      <li><b>Map and condition.</b> Compute \(c=B(\hat e_{\text{DINO}})\) and feed it to an off-the-shelf <b>IP-Adapter</b> (image-prompt) or <b>Stable-unCLIP</b>. Optionally add a text prompt for global scene layout.</li>
+      <li><b>Generate</b> normally — standard CFG, no guidance gradient.</li>
+    </ol>
+
+    <h6>Key settings</h6>
+    <ul>
+      <li>Bridge: 2–4 layer MLP; loss = cosine(1−sim) + \(\lambda\)·MSE; the more paired data the better the map.</li>
+      <li>IP-Adapter conditioning scale: sweep — higher = more faithful to the target, lower = more natural.</li>
+    </ul>
+
+    <h6>Pitfalls &amp; flags</h6>
+    <ul>
+      <li><span class="watch">The map is lossy.</span> CLIP and DINO don't encode identical information, so \(B\) discards whatever CLIP can't represent — your target gets blurred. Expect a quality ceiling below the RL/robust routes.</li>
+      <li><span class="watch">Unproven parts.</span> The community DINO→CLIP bridges are non-peer-reviewed, and IP-Adapter's own (reportedly better) <i>DINO</i> variant was never released. No primary source shows this end-to-end at high fidelity — use it as a <b>fast baseline / sanity check</b>, not the centerpiece.</li>
+    </ul>
+
+    <h6><span class="win">You'll know it worked when</span></h6>
+    <p>Images generated by conditioning on \(B(\hat e_{\text{DINO}})\) score high under your encoder and look natural — and you can put that number head-to-head against the gradient route in the paper's comparison.</p>
+
+    <div class="row links"><a href="https://arxiv.org/abs/2308.06721" target="_blank" rel="noopener">IP-Adapter · 2308.06721</a><a href="https://arxiv.org/abs/2412.16334" target="_blank" rel="noopener">DINOv2 Meets Text · 2412.16334</a><a href="https://github.com/SonicCodes/dinov2-clip" target="_blank" rel="noopener">bridge repo</a></div>
+  </div>
+
+  <div class="grp">Beyond your budget — needs training a generator (listed for completeness)</div>
+
+  <div class="paper">
+    <h5>5 · RCG — Representation-Conditioned Generation <span class="venue">— Li, Katabi &amp; He, NeurIPS 2024</span> <span class="tag" style="background:var(--warn);color:#241400">C</span><span class="tag" style="background:var(--bad)">G</span></h5>
+    <div class="row"><span class="lab">What</span><span>Train (i) a small <b>representation diffusion model</b> that <i>generates</i> SSL-feature vectors, and (ii) a pixel generator <b>conditioned on such a vector</b>. Then feed your DINOv2 target directly — clean generation, zero gradient. Purest fix, but needs a generator trained to accept DINO conditioning (your SD isn't one).</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2312.03701" target="_blank" rel="noopener">arXiv 2312.03701</a><a href="https://github.com/LTH14/rcg" target="_blank" rel="noopener">code</a></div>
+  </div>
+
+  <div class="paper">
+    <h5>6 · REPA — align a diffusion transformer's features to DINOv2 <span class="venue">— Yu et&nbsp;al., ICLR 2025 (Oral)</span> <span class="tag" style="background:var(--bad)">G</span></h5>
+    <div class="row"><span class="lab">What</span><span>During training, regularize a DiT/SiT's hidden states to match frozen <b>DINOv2</b> features (DINOv2 is its best encoder). This makes the generator's internals DINOv2-shaped → DINOv2 directions become renderable. The <i>right</i> idea for your mismatch — but it trains a generator <b>from scratch</b>, not a retrofit of SD.</span></div>
+    <div class="row links"><a href="https://arxiv.org/abs/2410.06940" target="_blank" rel="noopener">arXiv 2410.06940</a><a href="https://github.com/sihyun-yu/REPA" target="_blank" rel="noopener">code</a></div>
+  </div>
+
+  <div class="callout warn"><b>Always stack Part V on top.</b> If <i>any</i> gradient still flows (options 2 &amp; 3), apply the Part V hygiene — cutouts, guide-on-\(\hat x_0\), adaptive step, time-travel, MPGD. It's encoder-agnostic and raises the floor for DINOv2 exactly as it does for CLIP. Options 1 &amp; 4 sidestep gradients entirely, so Part V doesn't apply to them.</div>
+</section>
+
+<section class="block">
+  <h4>Ranked for you — effort vs. quality, keep-SD-frozen axis</h4>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>#</th><th>Option</th><th>Tag</th><th>Generator?</th><th>Effort</th><th>Expected quality</th><th>In budget?</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><b>RL reward-FT (DDPO/DPOK)</b></td><td>S</td><td>LoRA</td><td>Low–Med</td><td>High &amp; coherent (KL keeps it on-manifold); slow convergence</td><td>✅ yes</td></tr>
+      <tr><td>2</td><td><b>Robustify the encoder</b></td><td>R</td><td>none</td><td>Med (encoder only)</td><td>Likely big jump — <i>but unproven for DINO+diffusion</i></td><td>✅ yes</td></tr>
+      <tr><td>3</td><td><b>Readout-head guidance</b></td><td>R</td><td>none (heads)</td><td>Med</td><td>On-manifold by construction; capped by head fidelity</td><td>✅ yes</td></tr>
+      <tr><td>4</td><td><b>DINO→CLIP + IP-Adapter</b></td><td>C</td><td>none (adapter)</td><td>Med</td><td>No adversarial gradient; capped by lossy map; unproven end-to-end</td><td>✅ yes</td></tr>
+      <tr><td>5</td><td>RCG representation-conditioned gen</td><td>C/G</td><td><b>train new</b></td><td>High</td><td>Very clean; abandons your SD UNet</td><td>❌ over</td></tr>
+      <tr><td>6</td><td>REPA-aligned DiT</td><td>G</td><td><b>pretrain</b></td><td>Very High</td><td>Highest ceiling for DINO-renderability</td><td>❌ over</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout good"><b>My take, given "light fine-tune OK."</b> Do this in order. <b>(1) Start with DDPO reward-FT</b> — the most direct answer to your exact problem: using the encoder as a scalar reward makes the whole CLIP-vs-DINO mismatch <i>disappear</i>, it needs only a LoRA, and the KL-to-SD term guarantees natural images. Budget patience for RL convergence. <b>(2) In parallel, if you care about interpretability</b> — <i>which voxel drives which pixel</i>, scientifically valuable for your voxel→concept paper — <b>keep a true-gradient arm</b> via <b>robustifying the encoder</b> (option 2) and/or a <b>readout head</b> (option 3); both keep SD frozen. <b>(3) Treat the DINO→CLIP bridge (option 4) as a fast baseline</b> to sanity-check, knowing it's lossy. <b>Skip REPA/RCG</b> unless you later decide to train a generator. Net: <b>DDPO is your workhorse; a robustified-encoder or readout-head gradient arm is your interpretable companion.</b> And from Part IV — for the <i>paper</i>, using the encoder as a <b>score</b> (which DDPO and Path B both do) is not a compromise, it's the scientifically cleaner design.</div>
+</section>
+
+<!-- ============ REFERENCES ============ -->
+<div class="part" id="refs">
+  <h2>References</h2>
+  <h3>Every link verified 2026</h3>
+</div>
+<section class="block">
+  <p style="font-size:13px;color:var(--muted);margin-top:0">Note: <b>NEvo</b> is a <i>video</i>-synthesis paper (its relevance here is the search-not-gradient principle). <b>NEvo</b>, <b>BrainTrace</b>, and the flow-matching fixes are 2026-era arXiv IDs — all confirmed live.</p>
+  <div class="grp">Brain / neuroscience</div>
+  <ul class="refs">
+    <li>BrainDiVE — Luo et&nbsp;al., NeurIPS 2023 Oral. <a href="https://github.com/aluo-x/BrainDiVE" target="_blank" rel="noopener">code</a> · <a href="https://proceedings.neurips.cc/paper_files/paper/2023/hash/ef0c0a23a1a8219c4fc381614664df3e-Abstract-Conference.html" target="_blank" rel="noopener">proceedings</a></li>
+    <li>BrainSCUBA — Luo et&nbsp;al., ICLR 2024. <a href="https://arxiv.org/abs/2310.04420" target="_blank" rel="noopener">arXiv 2310.04420</a></li>
+    <li>BrainCLIP — Liu et&nbsp;al., 2023. <a href="https://arxiv.org/abs/2302.12971" target="_blank" rel="noopener">arXiv 2302.12971</a></li>
+    <li>Voxel-Weighted Activation Maximization — Shinkle &amp; Lescroart, CVPR 2025 workshop. <a href="https://arxiv.org/abs/2506.04379" target="_blank" rel="noopener">arXiv 2506.04379</a></li>
+    <li>NEvo (video) — EPFL, 2026. <a href="https://arxiv.org/abs/2607.02317" target="_blank" rel="noopener">arXiv 2607.02317</a> · <a href="https://huggingface.co/epfl-neuroai/NEvo" target="_blank" rel="noopener">HF</a></li>
+    <li>BrainTrace — Golbari et&nbsp;al., 2026. <a href="https://arxiv.org/abs/2605.23895" target="_blank" rel="noopener">arXiv 2605.23895</a> · <a href="https://yuvalgol123.github.io/BrainTrace/" target="_blank" rel="noopener">project</a></li>
+  </ul>
+  <div class="grp">Guidance machinery</div>
+  <ul class="refs">
+    <li>Classifier guidance — Dhariwal &amp; Nichol, 2021. <a href="https://arxiv.org/abs/2105.05233" target="_blank" rel="noopener">arXiv 2105.05233</a></li>
+    <li>Classifier-free guidance — Ho &amp; Salimans, 2022. <a href="https://arxiv.org/abs/2207.12598" target="_blank" rel="noopener">arXiv 2207.12598</a></li>
+    <li>DPS — Chung et&nbsp;al., ICLR 2023. <a href="https://arxiv.org/abs/2209.14687" target="_blank" rel="noopener">arXiv 2209.14687</a></li>
+    <li>FreeDoM — Yu et&nbsp;al., ICCV 2023. <a href="https://arxiv.org/abs/2303.09833" target="_blank" rel="noopener">arXiv 2303.09833</a> · <a href="https://github.com/vvictoryuki/freedom" target="_blank" rel="noopener">code</a></li>
+    <li>Universal Guidance — Bansal et&nbsp;al., 2023. <a href="https://arxiv.org/abs/2302.07121" target="_blank" rel="noopener">arXiv 2302.07121</a></li>
+    <li>MCG — Chung et&nbsp;al., NeurIPS 2022. <a href="https://arxiv.org/abs/2206.00941" target="_blank" rel="noopener">arXiv 2206.00941</a> · MPGD — He et&nbsp;al., ICLR 2024. <a href="https://arxiv.org/abs/2311.16424" target="_blank" rel="noopener">arXiv 2311.16424</a></li>
+    <li>TFG — Ye et&nbsp;al., NeurIPS 2024 Spotlight. <a href="https://neurips.cc/virtual/2024/poster/95462" target="_blank" rel="noopener">NeurIPS</a> · <a href="https://github.com/YWolfeee/Training-Free-Guidance" target="_blank" rel="noopener">code</a></li>
+    <li>Understanding &amp; Improving Training-free Loss-based Guidance (adversarial-gradient proof, adaptive step) — Shen et&nbsp;al., NeurIPS 2024. <a href="https://arxiv.org/abs/2403.12404" target="_blank" rel="noopener">arXiv 2403.12404</a></li>
+    <li>Self-Attention Guidance (SAG) — Hong et&nbsp;al., 2022. <a href="https://arxiv.org/abs/2210.00939" target="_blank" rel="noopener">arXiv 2210.00939</a></li>
+    <li>CLIP-Guided Diffusion — cutouts, spherical loss, TV/range (Crowson lineage). <a href="https://github.com/nerdyrodent/CLIP-Guided-Diffusion" target="_blank" rel="noopener">nerdyrodent/CLIP-Guided-Diffusion</a></li>
+    <li>Rectified-CFG++ — 2025. <a href="https://arxiv.org/abs/2510.07631" target="_blank" rel="noopener">arXiv 2510.07631</a> &nbsp;·&nbsp; CFG-MP — ICML 2026. <a href="https://arxiv.org/abs/2601.21892" target="_blank" rel="noopener">arXiv 2601.21892</a></li>
+  </ul>
+  <div class="grp">Fine-tuning &amp; conditioning</div>
+  <ul class="refs">
+    <li>Robust-classifier synthesis — Santurkar et&nbsp;al., NeurIPS 2019. <a href="https://arxiv.org/abs/1906.09453" target="_blank" rel="noopener">arXiv 1906.09453</a> &nbsp;·&nbsp; Perceptually-aligned gradients. <a href="https://arxiv.org/abs/1910.08640" target="_blank" rel="noopener">arXiv 1910.08640</a></li>
+    <li>Textual Inversion — Gal et&nbsp;al., 2022. <a href="https://arxiv.org/abs/2208.01618" target="_blank" rel="noopener">arXiv 2208.01618</a> &nbsp;·&nbsp; IP-Adapter — Ye et&nbsp;al., 2023. <a href="https://arxiv.org/abs/2308.06721" target="_blank" rel="noopener">arXiv 2308.06721</a></li>
+    <li>DRaFT. <a href="https://arxiv.org/abs/2309.17400" target="_blank" rel="noopener">arXiv 2309.17400</a> &nbsp;·&nbsp; DDPO. <a href="https://arxiv.org/abs/2305.13301" target="_blank" rel="noopener">arXiv 2305.13301</a> &nbsp;·&nbsp; DPOK. <a href="https://proceedings.neurips.cc/paper_files/paper/2023/file/fc65fab891d83433bd3c8d966edde311-Paper-Conference.pdf" target="_blank" rel="noopener">NeurIPS 2023</a></li>
+  </ul>
+  <div class="grp">DINOv2 / non-CLIP guidance (Area B)</div>
+  <ul class="refs">
+    <li>REPA — Representation Alignment for Generation (aligns DiT features to DINOv2) — Yu et&nbsp;al., ICLR 2025 Oral. <a href="https://arxiv.org/abs/2410.06940" target="_blank" rel="noopener">arXiv 2410.06940</a> · <a href="https://github.com/sihyun-yu/REPA" target="_blank" rel="noopener">code</a></li>
+    <li>RCG — Return of Unconditional / Representation-Conditioned Generation — Li, Katabi &amp; He, NeurIPS 2024. <a href="https://arxiv.org/abs/2312.03701" target="_blank" rel="noopener">arXiv 2312.03701</a> · <a href="https://github.com/LTH14/rcg" target="_blank" rel="noopener">code</a></li>
+    <li>Readout Guidance — Luo et&nbsp;al., CVPR 2024 Highlight. <a href="https://arxiv.org/abs/2312.02150" target="_blank" rel="noopener">arXiv 2312.02150</a> · <a href="https://readout-guidance.github.io/" target="_blank" rel="noopener">project</a></li>
+    <li>Diffusion Self-Guidance — Epstein et&nbsp;al., NeurIPS 2023. <a href="https://arxiv.org/abs/2306.00986" target="_blank" rel="noopener">arXiv 2306.00986</a></li>
+    <li>Robust Classifier Guidance — Kawar, Ganz &amp; Elad, TMLR 2022. <a href="https://arxiv.org/abs/2208.08664" target="_blank" rel="noopener">arXiv 2208.08664</a> &nbsp;·&nbsp; Robust CLIP/DINO perceptual metrics. <a href="https://arxiv.org/abs/2502.11725" target="_blank" rel="noopener">arXiv 2502.11725</a></li>
+    <li>DINOv2 Meets Text (DINO→text/CLIP alignment) — 2024. <a href="https://arxiv.org/abs/2412.16334" target="_blank" rel="noopener">arXiv 2412.16334</a> &nbsp;·&nbsp; community DINO→CLIP bridge. <a href="https://github.com/SonicCodes/dinov2-clip" target="_blank" rel="noopener">repo</a> (not peer-reviewed)</li>
+    <li>Deep Geometric Moments guidance (evidence DINO/CLIP gradients are a poor guidance signal) — 2025. <a href="https://arxiv.org/abs/2505.12486" target="_blank" rel="noopener">arXiv 2505.12486</a></li>
+  </ul>
+</section>
+
+<footer>
+  MindReading teaching guide · rebuilt 2026 for the voxel→concept project, with rendered LaTeX and motivation→approach→outcome derivations. Reproduction assets: <code>BrainDiVE/repro/</code>. All external links verified live via web search.
+</footer>
+</div>
+</body>
+</html>

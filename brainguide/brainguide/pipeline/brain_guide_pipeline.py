@@ -501,17 +501,63 @@ class mypipelineSAG(DiffusionPipeline):
             self.OPENAI_CLIP_MEAN.requires_grad = False
             self.OPENAI_CLIP_STD.requires_grad = False
         fp32_image = image.float()
-        resized_image = torch.nn.functional.interpolate(fp32_image, size=224, mode="bilinear")
-        normalized_image = (resized_image - self.OPENAI_CLIP_MEAN) / self.OPENAI_CLIP_STD
-        # --- ROI-independent gradient schedule -------------------------------
-        # The raw brain gradient's magnitude depends on each ROI head's output
-        # scale, so a single clip_guidance_scale over-drove faces/bodies/words
-        # (latents -> NaN -> black image) while it was fine for early-visual.
-        # Fix: rescale the gradient every step so the guidance term is a FIXED
-        # fraction of the current noise prediction. clip_guidance_scale is now a
-        # dimensionless strength (~0.05-0.2) that means the same thing for every
-        # ROI and every timestep.
-        loss = self.brain_tweak(normalized_image)
+
+        # === TEST 3 — readout-head guidance (option 3) =======================
+        # Differentiate a small head on the UNet's OWN mid-block features (captured
+        # by a hook during the self.unet call above), never the external encoder.
+        # The gradient then flows only through renderable UNet features -> it lands
+        # on-manifold by construction (alpha -> 1). Gated by pipe.readout_head.
+        _readout = getattr(self, "readout_head", None)
+        if _readout is not None:
+            feat = self._mid_feats["h"].float().mean(dim=(2, 3))       # [B,1280] pooled phi_t
+            tnorm = torch.full((feat.shape[0],), float(timestep) / 1000.0, device=feat.device)
+            loss = -_readout(feat, tnorm)[:, int(self.readout_roi)].mean()   # maximize target ROI
+            normalized_image = None
+        else:
+            # === TEST 1 — gradient hygiene (cutouts + TV/range regularizers) ==
+            # All gated by pipe attributes; defaults reproduce the baseline exactly.
+            n_cut   = int(getattr(self, "hygiene_cutouts", 0))     # 0 = off (baseline)
+            cut_pow = float(getattr(self, "hygiene_cut_pow", 1.0)) # crop-size skew
+            tv_w    = float(getattr(self, "hygiene_tv", 0.0))      # total-variation weight
+            range_w = float(getattr(self, "hygiene_range", 0.0))   # out-of-[0,1] penalty
+
+            def _norm224(img):
+                r = torch.nn.functional.interpolate(img, size=224, mode="bilinear", align_corners=False)
+                return (r - self.OPENAI_CLIP_MEAN) / self.OPENAI_CLIP_STD
+
+            if n_cut > 0:
+                # Augmentation-averaged brain gradient. Random square crops (random
+                # size & position), each resized to 224, scored, and averaged. Per-
+                # pixel adversarial directions disagree across crops and cancel;
+                # only spatially-coherent semantic signal survives. (Crowson/Disco.)
+                B, C, H, W = fp32_image.shape
+                gen = getattr(self, "_cut_gen", None)
+                losses = []
+                for _ in range(n_cut):
+                    # crop side in [0.5, 1.0] of the short edge, skewed by cut_pow
+                    short = min(H, W)
+                    frac = 0.5 + 0.5 * (torch.rand(1, generator=gen, device=fp32_image.device).item() ** cut_pow)
+                    s = max(16, int(frac * short))
+                    top  = int(torch.randint(0, H - s + 1, (1,), generator=gen, device=fp32_image.device).item()) if H > s else 0
+                    left = int(torch.randint(0, W - s + 1, (1,), generator=gen, device=fp32_image.device).item()) if W > s else 0
+                    crop = fp32_image[:, :, top:top + s, left:left + s]
+                    losses.append(self.brain_tweak(_norm224(crop)))
+                loss = torch.stack(losses).mean()
+                normalized_image = None
+            else:
+                normalized_image = _norm224(fp32_image)
+                loss = self.brain_tweak(normalized_image)
+
+            # On-manifold regularizers (minimized alongside the brain loss).
+            if tv_w > 0.0:
+                tv = (fp32_image[:, :, 1:, :] - fp32_image[:, :, :-1, :]).abs().mean() \
+                   + (fp32_image[:, :, :, 1:] - fp32_image[:, :, :, :-1]).abs().mean()
+                loss = loss + tv_w * tv
+            if range_w > 0.0:
+                rng = (fp32_image - fp32_image.clamp(0, 1)).pow(2).mean()
+                loss = loss + range_w * rng
+        # =====================================================================
+
         grad = torch.autograd.grad(loss, latents)[0]
         g_norm = grad.flatten(1).norm(dim=1).clamp_min(1e-8).view(-1, *([1] * (grad.ndim - 1)))
         n_norm = noise_pred_original.flatten(1).norm(dim=1).view(-1, *([1] * (grad.ndim - 1)))
@@ -530,7 +576,6 @@ class mypipelineSAG(DiffusionPipeline):
                   f"raw_gnorm={g_norm.mean():.3e}")
         del loss
         del normalized_image
-        del resized_image
         del fp32_image
         del image
 
@@ -726,92 +771,87 @@ class mypipelineSAG(DiffusionPipeline):
         self.unet.mid_block.attentions[0].transformer_blocks[0].attn1.processor = store_processor
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         # with self.progress_bar(total=num_inference_steps) as progress_bar:
+        # === TEST 2 — time-travel / resampling window ========================
+        # For steps inside the "semantic" window, redo the guided step `reps`
+        # times, re-noising x_{t-1} back to level t between tries so the diffusion
+        # prior re-absorbs off-manifold (adversarial) kicks. reps=1 == baseline.
+        tt_reps  = int(getattr(self, "timetravel_reps", 1))          # 1 = off
+        tt_lo    = float(getattr(self, "timetravel_lo", 0.10))       # window start (frac of steps)
+        tt_hi    = float(getattr(self, "timetravel_hi", 0.60))       # window end
+        acp = self.scheduler.alphas_cumprod.to(device)
+        n_steps = len(timesteps)
+        # =====================================================================
         for i, t in enumerate(timesteps):
-            # expand the latents if we are doing classifier free guidance
-            latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+            frac = i / max(1, n_steps - 1)
+            reps = tt_reps if (tt_reps > 1 and tt_lo <= frac <= tt_hi and i + 1 < n_steps) else 1
+            t_prev = timesteps[i + 1] if i + 1 < n_steps else timesteps[i]
+            x_cur = latents                      # current latent at noise level t
+            for _rep in range(reps):
+                latents = x_cur
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-            # predict the noise residual
-            noise_pred = self.unet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=prompt_embeds,
-                cross_attention_kwargs=cross_attention_kwargs,
-            ).sample
-            # perform guidance
-            if do_classifier_free_guidance:
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                #                     if i == 0:
-                #                         print(torch.flatten(noise_pred_uncond)[:3], torch.flatten(noise_pred_text)[:3], "uncond noises")
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-                # noise_pred = clamp_latent(noise_pred)
-                # print(noise_pred.shape, "NOISE SHAPE")
-            #                 if i ==0:
-            #                     print(torch.flatten(latents)[:3], "LATENT")
-            # perform self-attention guidance with the stored self-attentnion map
-            if do_self_attention_guidance:
-                # classifier-free guidance produces two chunks of attention map
-                # and we only use unconditional one according to equation (24)
-                # in https://arxiv.org/pdf/2210.00939.pdf
-                if do_classifier_free_guidance:
-                    # DDIM-like prediction of x0
-                    pred_x0 = self.pred_x0(latents, noise_pred_uncond, t)
-                    #                         if i == 0:
-                    #                             print(torch.flatten(latents)[:3], torch.flatten(noise_pred_uncond)[:3], "CLASSIFIER")
-                    #                         if i == 0:
-                    #                             print(torch.flatten(pred_x0)[:3], "GUIDED")
-                    # get the stored attention maps
-                    uncond_attn, cond_attn = store_processor.attention_probs.chunk(2)
-                    # self-attention-based degrading of latents
-                    #                         for zzz in [pred_x0, uncond_attn, t, self.pred_epsilon(latents, noise_pred_uncond, t)]:
-                    #                             print(zzz.shape, "SHAPE")
-                    #                         print(pred_x0.shape, uncond_attn, t, self.pred_epsilon(latents, noise_pred_uncond, t))
-                    degraded_latents = self.sag_masking(
-                        pred_x0, uncond_attn, t, self.pred_epsilon(latents, noise_pred_uncond, t)
-                    )
-                    uncond_emb, _ = prompt_embeds.chunk(2)
-                    # forward and give guidance
-                    degraded_pred = self.unet(degraded_latents, t, encoder_hidden_states=uncond_emb).sample
-                    noise_pred += sag_scale * (noise_pred_uncond - degraded_pred)
-                else:
-                    # DDIM-like prediction of x0
-                    pred_x0 = self.pred_x0(latents, noise_pred, t)
-                    #                         if i == 0:
-                    #                             print(torch.flatten(latents)[:3], torch.flatten(noise_pred)[:3], "RAW UNCOND")
-
-                    # get the stored attention maps
-                    cond_attn = store_processor.attention_probs
-                    # self-attention-based degrading of latents
-                    degraded_latents = self.sag_masking(
-                        pred_x0, cond_attn, t, self.pred_epsilon(latents, noise_pred, t)
-                    )
-                    # forward and give guidance
-                    degraded_pred = self.unet(degraded_latents, t, encoder_hidden_states=prompt_embeds).sample
-                    noise_pred += sag_scale * (noise_pred - degraded_pred)
-            if clip_guidance_scale > 0:
-                #                     self.unet.mid_block.attentions[0].transformer_blocks[0].attn1.processor.save = False
-                text_embeddings_for_guidance = (
-                    prompt_embeds.chunk(2)[1] if do_classifier_free_guidance else prompt_embeds
-                )
-                noise_pred, latents = self.cond_fn(
-                    latents,
+                # predict the noise residual
+                noise_pred = self.unet(
+                    latent_model_input,
                     t,
-                    i,
-                    text_embeddings_for_guidance,
-                    noise_pred,
-                    clip_guidance_scale
-                )
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
-            # print(latents.shape, "LATENTS SHAPE")
-            # old_latents_uncond = latents[0]+0.0
-            # latents = clamp_latent(latents)
-            # latents[0] = old_latents_uncond
+                    encoder_hidden_states=prompt_embeds,
+                    cross_attention_kwargs=cross_attention_kwargs,
+                ).sample
+                # perform guidance
+                if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+                # perform self-attention guidance with the stored self-attention map
+                if do_self_attention_guidance:
+                    if do_classifier_free_guidance:
+                        pred_x0 = self.pred_x0(latents, noise_pred_uncond, t)
+                        uncond_attn, cond_attn = store_processor.attention_probs.chunk(2)
+                        degraded_latents = self.sag_masking(
+                            pred_x0, uncond_attn, t, self.pred_epsilon(latents, noise_pred_uncond, t)
+                        )
+                        uncond_emb, _ = prompt_embeds.chunk(2)
+                        degraded_pred = self.unet(degraded_latents, t, encoder_hidden_states=uncond_emb).sample
+                        noise_pred += sag_scale * (noise_pred_uncond - degraded_pred)
+                    else:
+                        pred_x0 = self.pred_x0(latents, noise_pred, t)
+                        cond_attn = store_processor.attention_probs
+                        degraded_latents = self.sag_masking(
+                            pred_x0, cond_attn, t, self.pred_epsilon(latents, noise_pred, t)
+                        )
+                        degraded_pred = self.unet(degraded_latents, t, encoder_hidden_states=prompt_embeds).sample
+                        noise_pred += sag_scale * (noise_pred - degraded_pred)
+
+                if clip_guidance_scale > 0:
+                    text_embeddings_for_guidance = (
+                        prompt_embeds.chunk(2)[1] if do_classifier_free_guidance else prompt_embeds
+                    )
+                    noise_pred, latents = self.cond_fn(
+                        latents,
+                        t,
+                        i,
+                        text_embeddings_for_guidance,
+                        noise_pred,
+                        clip_guidance_scale
+                    )
+                # compute the previous noisy sample x_t -> x_{t-1}
+                x_next = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+
+                if _rep < reps - 1:
+                    # time-travel: renoise x_{t-1} back up to level t and redo the
+                    # guided step, letting the prior re-absorb off-manifold kicks.
+                    a_t, a_prev = acp[int(t)], acp[int(t_prev)]
+                    ratio = (a_t / a_prev).clamp(max=1.0)
+                    noise = torch.randn(x_next.shape, device=x_next.device, dtype=x_next.dtype, generator=generator)
+                    x_cur = ratio.sqrt() * x_next + (1.0 - ratio).sqrt() * noise
+                else:
+                    x_cur = x_next
+            latents = x_cur
 
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
-                # progress_bar.update()
                 if callback is not None and i % callback_steps == 0:
                     callback(i, t, latents)
 

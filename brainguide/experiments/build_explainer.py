@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""Merge: full original teaching guide (MathJax inlined) + a new Results part."""
+import base64, io, re
+from pathlib import Path
+from PIL import Image
+
+ROOT = Path("/Users/danielnurieli/AI work/MindReading")
+SCR = Path("/private/tmp/claude-501/-Users-danielnurieli-AI-work-MindReading/158d213d-99e6-4714-affb-65a69598a469/scratchpad")
+PULLED = ROOT / "brainguide/experiments/pulled"
+ORIG = (ROOT / "session_answers_2026-08-25.html").read_text()
+MJS = (SCR / "mathjax-tex-svg.js").read_text()
+OUT = SCR / "merged.html"
+ROIS = ["faces", "places", "words", "bodies", "earlyvisual"]
+
+def datauri(rel, px=240, q=78):
+    p = PULLED / rel
+    if not p.exists():
+        return ""
+    im = Image.open(p).convert("RGB").resize((px, px), Image.LANCZOS)
+    b = io.BytesIO(); im.save(b, "JPEG", quality=q)
+    return "data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode()
+
+def cell(rel, label=None):
+    src = datauri(rel)
+    inner = (f'<img loading="lazy" alt="{label or rel}" src="{src}">' if src
+             else '<span class="miss">generating…</span>')
+    return f'<div class="rc">{inner}</div>'
+
+def grid(cols, rows, tpl):
+    """cols/rows: label lists. tpl(colkey,rowkey)->relpath. cols are (key,label)."""
+    n = len(cols)
+    head = '<div class="rrow rhead"><div class="rl"></div>' + "".join(
+        f'<div class="ch">{lbl}</div>' for _, lbl in cols) + "</div>"
+    body = ""
+    for rk, rl in rows:
+        body += f'<div class="rrow" style="--n:{n}"><div class="rl">{rl}</div>' + "".join(
+            cell(tpl(ck, rk), f"{ck} {rk}") for ck, _ in cols) + "</div>"
+    return f'<div class="rgw"><div class="rg" style="--n:{n}">{head}{body}</div></div>'
+
+# --- the three result figures ---
+master = grid(
+    cols=[("baseline","baseline"),("t1","plan1 hygiene"),("t2ctrl","plan2 ctrl"),
+          ("t2tt","plan2 t-travel"),("t4","plan4 bridge")],
+    rows=[(r,r) for r in ROIS],
+    tpl=lambda c,r: {
+        "baseline":f"baseline/base_{r}_seed0_0.png","t1":f"test1/t1_{r}_seed0_0.png",
+        "t2ctrl":f"test2/t2ctrl_{r}_seed0_0.png","t2tt":f"test2/t2tt_{r}_seed0_0.png",
+        "t4":f"test4/t4_{r}_seed0_0.png"}[c])
+
+# ---- selectivity heatmaps (from eval_metrics output) ----
+import json as _json
+SELJSON = ROOT / "brainguide/experiments/pulled/eval/selectivity.json"
+HELDJSON = ROOT / "brainguide/experiments/pulled/eval/selectivity_heldout.json"
+def sel_heatmaps(path):
+    if not path.exists():
+        return "<p class='rcap'>(matrix not found)</p>"
+    d = _json.loads(path.read_text()); rois = d["rois"]
+    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo"]
+    lbl = {"baseline":"baseline","plan1":"plan 1","plan2ctrl":"plan 2 ctrl",
+           "plan2tt":"plan 2 t-travel","plan4":"plan 4","readout":"readout (3)","ddpo":"DDPO (1)"}
+    def col(z):
+        z = max(-2.0, min(2.0, z))
+        if z >= 0: return f"rgba(46,158,143,{z/2*0.75:.2f})"
+        return f"rgba(201,86,63,{-z/2*0.55:.2f})"
+    # ranking bar
+    rows = sorted(((m, d["methods"][m]) for m in order if m in d["methods"]),
+                  key=lambda kv: -kv[1]["selectivity_contrast"])
+    rank = '<table class="seltab"><tr><th>method</th><th>diag-argmax</th><th>contrast (z)</th></tr>'
+    for m, v in rows:
+        rank += (f'<tr><td>{lbl[m]}</td><td>{v["diag_argmax_hits"]}/5</td>'
+                 f'<td>{v["selectivity_contrast"]:+.2f}</td></tr>')
+    rank += "</table>"
+    # per-method mini heatmaps
+    hm = '<div class="hmwrap">'
+    for m in order:
+        if m not in d["methods"]: continue
+        z = d["methods"][m]["z"]
+        t = f'<div class="hm"><div class="hmt">{lbl[m]}</div><table class="hmtab">'
+        t += '<tr><td class="hc"></td>' + "".join(f'<td class="hc">{r[:4]}</td>' for r in rois) + '</tr>'
+        for i, ri in enumerate(rois):
+            t += f'<tr><td class="hc">{ri[:4]}</td>'
+            for j in range(5):
+                b = col(z[i][j]); edge = "outline:2px solid var(--accent);" if i==j else ""
+                t += f'<td style="background:{b};{edge}">{z[i][j]:+.1f}</td>'
+            t += "</tr>"
+        hm += t + "</table></div>"
+    hm += "</div>"
+    return rank + hm
+
+def compare_table():
+    if not (SELJSON.exists() and HELDJSON.exists()):
+        return ""
+    o = _json.loads(SELJSON.read_text())["methods"]
+    h = _json.loads(HELDJSON.read_text())["methods"]
+    lbl = {"baseline":"baseline","plan1":"plan 1 hygiene","plan2ctrl":"plan 2 ctrl",
+           "plan2tt":"plan 2 t-travel","plan4":"plan 4 bridge","readout":"readout-head (3)","ddpo":"DDPO (1)"}
+    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo"]
+    t = ('<table class="seltab"><tr><th>method</th><th>our encoder</th><th>held-out</th>'
+         '<th>drop = hacking</th></tr>')
+    for m in order:
+        if m not in o or m not in h: continue
+        oc = o[m]["selectivity_contrast"]; hc = h[m]["selectivity_contrast"]; dr = oc - hc
+        flag = " ✓ honest" if abs(dr) <= 0.1 else (" ⚠ inflated" if dr > 0.25 else "")
+        t += (f'<tr><td>{lbl[m]}</td><td>{oc:+.2f}</td><td>{hc:+.2f}</td>'
+              f'<td>{dr:+.2f}{flag}</td></tr>')
+    return t + "</table>"
+
+def summary_table():
+    if not HELDJSON.exists():
+        return ""
+    h = _json.loads(HELDJSON.read_text())["methods"]
+    # (key, label, family, one-line mechanism, verdict)
+    rows = [
+        ("baseline", "baseline", "—", "raw encoder gradient into the latent every step",
+         "the low-α failure; floor, partly hacked"),
+        ("plan1", "plan 1 · hygiene", "R", "crop-averaged gradient + TV/range regularizers",
+         "honest &amp; selective, but flattens to mush"),
+        ("plan2tt", "plan 2 · time-travel", "R", "re-noise/re-denoise so the prior re-absorbs kicks",
+         "sharper; still partly encoder-hacked"),
+        ("plan4", "plan 4 · bridge+IP-Adapter", "C", "score → top-K DINO centroid → CLIP → condition SD",
+         "best realism; loose selectivity (4/5)"),
+        ("readout", "readout-head (opt 3)", "R", "head on SD's own UNet features; guide via ∇head",
+         "★ best overall — honest, selective, realistic"),
+        ("ddpo", "DDPO (opt 1)", "S", "RL: encoder as reward, PPO-update a LoRA",
+         "underperformed at demo scale (sample-hungry)"),
+    ]
+    t = ('<table class="seltab"><tr><th>method</th><th>family</th><th>how it beats the mismatch</th>'
+         '<th>held-out sel.</th><th>verdict</th></tr>')
+    for k, lab, fam, mech, verd in rows:
+        hc = h.get(k, {}).get("selectivity_contrast"); hh = h.get(k, {}).get("diag_argmax_hits")
+        sel = f'{hh}/5, {hc:+.2f}' if hc is not None else '—'
+        t += (f'<tr><td><b>{lab}</b></td><td class="k">{fam}</td><td>{mech}</td>'
+              f'<td>{sel}</td><td>{verd}</td></tr>')
+    return t + ('</table><p class="rcap">Family: <b>S</b>=score-only (α irrelevant) · '
+                '<b>R</b>=realign gradient (raise α) · <b>C</b>=condition natively. '
+                'Held-out sel. = diagonal-argmax hits &amp; contrast on the independent BrainDiVE-CLIP encoder.</p>')
+
+SEL_HTML = sel_heatmaps(SELJSON)
+HELDOUT_HTML = sel_heatmaps(HELDJSON)
+COMPARE_HTML = compare_table()
+SUMMARY_HTML = summary_table()
+
+SEEDCOLS = [(f"s{s}", f"seed {s}") for s in range(5)]
+ROIROWS = [(r, r) for r in ROIS]
+plan4_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test4/t4_{r}_seed{c[1:]}_0.png")
+plan1_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test1/t1_{r}_seed{c[1:]}_0.png")
+plan2_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test2/t2tt_{r}_seed{c[1:]}_0.png")
+base_samples  = grid(SEEDCOLS, ROIROWS, lambda c, r: f"baseline/base_{r}_seed{c[1:]}_0.png")
+readout_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test3/t3_{r}_seed{c[1:]}_0.png")
+ddpo_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test5/t5_{r}_seed{c[1:]}_0.png")
+def _abs_datauri(p):
+    import base64 as _b
+    q=Path(p)
+    return ("data:image/png;base64,"+_b.b64encode(q.read_bytes()).decode()) if q.exists() else ""
+DDPO_REWARD_IMG = _abs_datauri(SCR / "ddpo_reward.png")
+
+caveat = grid(
+    cols=[("baseline","baseline"),("t4","plan4")],
+    rows=[("words","words"),("earlyvisual","earlyvisual")],
+    tpl=lambda c,r: (f"baseline/sub1_{r}_seed0_0.png" if c=="baseline"
+                     else f"test4/t4_{r}_seed0_0.png"))
+
+RESULTS = f'''
+<div class="part" id="results">
+  <h2>Part VII</h2>
+  <h3>Results — what actually came out</h3>
+  <p class="lede">Universal (DINOv2) encoder · 5 ROIs · SD&nbsp;1.5 · L4 GPU. This is the empirical
+  test of everything in Parts I–VI: does cleaning the gradient (plans&nbsp;1–2) or abandoning it
+  (plan&nbsp;4) beat the raw baseline?</p>
+
+  <h4 class="rh">The seven methods we tried — at a glance</h4>
+  {SUMMARY_HTML}
+
+  <h4 class="rh">Every method, one sample per ROI (seed 0)</h4>
+  {master}
+  <p class="rcap">Reading the rows through the \\(\\alpha\\) lens: <b>baseline</b> is the low-\\(\\alpha\\)
+  failure (washed / texture-leaning). <b>plan&nbsp;1</b> calms texture but flattens — hygiene raised
+  \\(\\alpha\\) yet hit the ceiling. <b>plan&nbsp;2</b> is sharper (prior re-projection) but still shows
+  the DINOv2 off-manifold signature. <b>plan&nbsp;4</b> is the only unambiguously photographic column —
+  it never took the gradient, so \\(\\alpha\\) is irrelevant.</p>
+
+  <p class="rcap">Below: five samples per ROI for each plan (rows = ROIs, columns = seeds 0–4), so you
+  can judge the <em>spread</em>, not one lucky draw. 100 images total; all runs complete.</p>
+
+  <h4 class="rh">Baseline — raw gradient (5 samples/ROI)</h4>
+  {base_samples}
+  <p class="rcap">Low-\\(\\alpha\\) failure mode: washed, texture-leaning, content barely legible across
+  every seed — the problem all three plans are trying to beat.</p>
+
+  <h4 class="rh">Plan 1 — gradient hygiene (5 samples/ROI)</h4>
+  {plan1_samples}
+  <p class="rcap">Crop-averaging + TV/range kills the per-pixel adversarial half, so texture calms — but
+  it flattens toward the painterly ceiling that \\(\\alpha\\) imposes on any gradient method.</p>
+
+  <h4 class="rh">Plan 2 — time-travel (5 samples/ROI)</h4>
+  {plan2_samples}
+  <p class="rcap">Re-noise/re-denoise re-projects onto the manifold each pass — sharper and more
+  structured than the baseline, yet the DINOv2 off-manifold signature still shows.</p>
+
+  <h4 class="rh">Plan 4 — bridge + IP-Adapter (5 samples/ROI)</h4>
+  <p class="rcap">The bridge target is fixed per ROI (a top-K centroid); the five seeds vary only the
+  diffusion noise. The only unambiguously photographic column — it never took the gradient, so
+  \\(\\alpha\\) is irrelevant.</p>
+  {plan4_samples}
+
+  <h4 class="rh">Readout-head (option 3) — 5 samples/ROI</h4>
+  <p class="rcap">The Part-VIII plan, now run: guide on a small head trained on SD's <em>own</em> UNet
+  features (encoder used only for labels). More photographic than the raw-gradient baseline (α raised —
+  real faces and scenes, not static), while staying ROI-specific. Not as pristine as plan 4, but far more
+  selective — see the numbers below.</p>
+  {readout_samples}
+
+  <h4 class="rh">DDPO (option 1) — RL reward fine-tune (5 samples/ROI)</h4>
+  <p class="rcap">The other Part-VIII plan, run as a <b>compact demo</b>: 30 rounds × 8 samples/ROI, a
+  1.2M-param LoRA on SD, the DINOv2 encoder used only as a scalar reward. Reward climbed on some ROIs
+  (early-visual +0.55, words +0.42, faces +0.11) but fell on others (places, bodies) — net noisy.</p>
+  <img class="rewardfig" src="{DDPO_REWARD_IMG}" alt="DDPO reward vs round">
+  {ddpo_samples}
+  <div class="cbox"><h4>Honest read — DDPO underperformed here, and why</h4>
+  <p>Its selectivity landed at just <b>2/5 (contrast +0.55 our encoder, +0.39 held-out)</b> — the weakest
+  of every method. This isn't a flaw in the method but in its <b>budget</b>: DDPO is <em>sample-hungry</em>
+  (real runs use hundreds of rounds / thousands of images), and 240 samples cannot move a 1.2M-param LoRA
+  decisively. The survey warned of exactly this. What the demo <em>does</em> prove is that the machinery
+  runs end-to-end — sample → score with the frozen encoder → policy-gradient (REINFORCE + PPO clip) →
+  update the LoRA → generate. Realising option 1's promise needs a full-scale run.</p></div>
+
+  <h4 class="rh">The one caveat with plan 4 — selectivity</h4>
+  <p>Plan 4 builds each ROI's target by averaging the top-K liked embeddings into one centroid,
+  \\( \\bar e_{{\\text{{ROI}}}} = \\tfrac1K\\sum_k e_k \\), then rendering it. A centroid captures the
+  region's central tendency but <b>blurs anything the top-K don't share</b> — so if a region's favourites
+  are diverse, the average is a washed-out prototype and the generator draws a plausible-but-<b>generic</b>
+  object rather than a sharply category-specific one. That is exactly what we see: <b>words</b> and
+  <b>early&nbsp;visual</b> both collapse to a near-identical “plate of spoons.” Visually best is not
+  automatically most ROI-<em>selective</em>.</p>
+  {caveat}
+  <p class="rcap">How we'd settle it (not yet run, per hold on metrics): a <b>selectivity matrix</b>
+  (score ROI-<i>i</i> images on every ROI <i>j</i>; strong diagonal = specific) and a <b>held-out
+  encoder</b> — because plans 1&nbsp;&amp;&nbsp;2 optimise our own encoder's gradient, scoring them on it
+  is circular; an independent encoder (the reproduced original BrainDiVE CLIP model) is the honest judge.</p>
+
+  <h4 class="rh">Selectivity — the numbers (our encoder)</h4>
+  <p>Eyeballing can't separate "looks real" from "drives the right region." So we <em>measure</em>: show
+  every one of the 125 images to the frozen encoder and ask, for each, "how hard would each of the five
+  regions fire?" Arrange the answers in a grid — one <b>row per region we generated for</b>, one
+  <b>column per region we scored on</b>.</p>
+  <ul class="gl">
+    <li><b>Why z-scores?</b> Raw firing numbers aren't comparable across regions (each has its own
+    baseline and scale). So we convert each column to a <b>z-score</b>: how many standard deviations above
+    the <em>typical</em> image this one drives that region. \(z=+1.5\) means "1.5 SD harder than average";
+    \(z=0\) is average; negative is below average.</li>
+    <li><b>How to read the heatmap.</b> The <b>diagonal</b> cell of each row (outlined) is "did the
+    faces-images drive the <em>faces</em> region?" A selective method has the diagonal as the reddest
+    (highest-z) cell in its row — the image drives its own region and <em>no other</em>.</li>
+    <li><b>Contrast</b> = mean(diagonal) − mean(off-diagonal), in z. Bigger = cleaner selectivity.
+    <b>Diag-argmax</b> = how many of the 5 rows have their diagonal as the row-max (5/5 is perfect).</li>
+  </ul>
+  <p class="anlg"><b>Worked example — plan 4's "faces" row.</b> faces \(=+1.25\), but <b>bodies
+  \(=+1.12\)</b> right behind it: plan 4's face images fire the <em>bodies</em> region almost as hard —
+  because they're whole people, not face close-ups. And in its <b>early-visual</b> row, <em>words</em>
+  ties the diagonal (\(+0.97\) each) — the "plate of spoons" firing both. Those two near-misses are why
+  plan 4 scores 4/5, not 5/5.</p>
+  {SEL_HTML}
+  <div class="cbox"><h4>Read this carefully — it is the <em>biased</em> view</h4>
+  <p>On <em>our own</em> encoder the gradient methods (plans 1–2) score highest and plan&nbsp;4 lowest
+  (4/5, contrast +1.43). But plans 1–2 <em>optimize this exact encoder's gradient</em> — so their high
+  scores are partly circular (reward hacking), not proof of better content. Plan&nbsp;4's misses are
+  exactly the ones we saw by eye: <b>faces↔bodies</b> (its "faces" are whole people) and
+  <b>words↔early-visual</b> (the plate of spoons). The decisive, unbiased test is the <b>held-out
+  encoder</b> — and we ran it.</p></div>
+
+  <h4 class="rh">The honest judge — held-out encoder (independent BrainDiVE-CLIP)</h4>
+  <p>We re-scored all 125 images with a <em>completely different</em> encoder — the reproduced original
+  BrainDiVE model (OpenCLIP ViT-B/16 + linear read-out, subject 1, exact 4657/22961 voxel match). No
+  method optimized <em>this</em> one, so it can't be gamed. The tell is the <b>drop</b> = our-encoder
+  contrast − held-out contrast: a big drop means the method's selectivity was inflated by hacking our
+  encoder; near-zero means it found genuinely ROI-driving content.</p>
+  {COMPARE_HTML}
+  <div class="cbox"><h4>What the held-out test reveals</h4>
+  <p><b>The gradient methods partly evaporate.</b> baseline (−0.32), plan 2 ctrl (−0.38) and plan 2
+  time-travel (−0.30) all drop meaningfully — their high scores on our own encoder were partly circular,
+  as predicted.</p>
+  <p><b>Plan 1 and Plan 4 are honest.</b> plan 1 barely moves (−0.04) and is the <em>highest</em>
+  held-out selectivity (+1.85); plan 4 actually <em>rises</em> slightly (+0.04) — because it never touched
+  the gradient, there was nothing to hack. Plan 4's only misses (faces↔bodies, words↔early-visual)
+  persist on the independent encoder too, confirming they're <em>real content</em> properties, not
+  measurement artifacts.</p>
+  <p><b>Readout-head (option 3) is the honest all-rounder.</b> Held-out <b>5/5, +1.67, drop −0.04</b> —
+  as honest as plan 4 but <em>more</em> selective (5/5 vs 4/5), and more photographic than the raw-gradient
+  baseline (its head guides on the UNet's own features, so α is raised at the source). It's the closest
+  thing to "selective <em>and</em> realistic <em>and</em> honest" the study produced.</p>
+  <p><b>Bottom line (all 7 methods scored).</b> <b>Readout-head (option 3) is the winner overall</b> —
+  honest (−0.04), selective (5/5, held-out +1.67), and more realistic than the gradient baselines. Plan 4
+  = best pure realism but loose selectivity (4/5, honest). Plan 1 = highest honest selectivity but mushy.
+  The gradient baselines (baseline, plan 2) look selective on our encoder but partly evaporate on the
+  held-out one. DDPO (option 1) underperformed at demo scale (2/5) — sample-hungry, not broken. So the
+  practical recommendation: <b>readout-head for a selective + realistic result today; a full-scale DDPO
+  as the higher-ceiling bet.</b></p></div>
+  <div class="hmwrap-label rcap">Held-out selectivity matrices (z, diagonal accented):</div>
+  {HELDOUT_HTML}
+
+  <h4 class="rh">Footnote — unCLIP → IP-Adapter</h4>
+  <p>The survey's option&nbsp;4 said “bridge + IP-Adapter / <b>unCLIP</b>.” Stable&nbsp;unCLIP is
+  <b>gated</b> on Hugging&nbsp;Face (401 anonymous), so plan&nbsp;4 uses the public equivalent —
+  SD&nbsp;1.5&nbsp;+&nbsp;IP-Adapter — which consumes the same CLIP-ViT-H image embedding the bridge
+  produces. Same idea, reachable weights.</p>
+</div>
+'''
+
+NEXTSTEPS = r'''
+<div class="part" id="next">
+  <h2>Part VIII</h2>
+  <h3>Two more methods we built (options 3 &amp; 1) — raising \(\alpha\) without touching the encoder</h3>
+  <p class="lede">Plan 4 wins on realism but its ROI-selectivity is loose (whole people instead of face
+  close-ups; a generic "plate of spoons" for words and early-visual). So we built two more methods aimed
+  at being <em>both</em> photographic <em>and</em> sharply ROI-specific — under one hard rule:
+  <span class="frozen">the brain encoder's weights are never touched.</span> Both are now implemented,
+  run, and scored — this section explains the math and intuition; their results are in Part&nbsp;VII.</p>
+
+  <div class="cbox">
+    <h4>The constraint, and what it rules out</h4>
+    <p>Recall §I: the whole problem is the alignment number \(\alpha\) — the fraction of the brain
+    gradient that lies <em>on</em> the image manifold. There are only three escapes: raise \(\alpha\),
+    make \(\alpha\) irrelevant, or retrain the generator. Keeping the encoder frozen rules out
+    <b>option&nbsp;2 (robustify the encoder)</b>, which would adversarially fine-tune its read-out. That
+    leaves two frozen-encoder routes, both of which we will build: <b>readout-head guidance</b> (raise
+    \(\alpha\)) and <b>DDPO</b> (make \(\alpha\) irrelevant).</p>
+  </div>
+
+  <h4 class="rh">Step A — first, <em>measure</em> (you can't improve what you can't score)</h4>
+  <p>Judging by eye conflates realism with selectivity. We score every generated image with the frozen
+  encoder and build a <b>selectivity matrix</b>: entry \(M_{ij}\) is the mean predicted activation, over
+  the images generated <em>for</em> ROI&nbsp;\(i\), measured <em>on</em> ROI&nbsp;\(j\)'s voxels.</p>
+  \[ M_{ij}=\operatorname*{mean}_{x\ \in\ \text{images for ROI } i}\ a_{\text{ROI } j}(x),
+     \qquad\text{selective}\ \Longleftrightarrow\ \arg\max_j M_{ij}=i\ \ \text{(strong diagonal).} \]
+  <p><b>Intuition:</b> a good method makes ROI-\(i\) images that fire ROI&nbsp;\(i\) <em>and no other</em>
+  — so the matrix's diagonal should dominate each row. This is where plan&nbsp;4's averaging would show a
+  cost. Crucially we <em>also</em> re-score with a <b>held-out, independent encoder</b> — the reproduced
+  original BrainDiVE CLIP model — because plans&nbsp;1&nbsp;&amp;&nbsp;2 optimize <em>our</em> encoder's
+  gradient, so scoring them on our own encoder is circular (reward hacking); an independent judge is the
+  honest test.</p>
+
+  <h4 class="rh">Step B — Readout-head guidance (option 3): raise \(\alpha\) by changing <em>what we differentiate</em></h4>
+  <p class="one">In one sentence</p>
+  <p>Instead of differentiating the foreign DINOv2 encoder, we teach a tiny helper to predict the brain
+  score from Stable Diffusion's <em>own</em> internal features — and we guide by differentiating that
+  helper instead. Because the helper reads the generator's native language, its gradient can't push
+  off-manifold.</p>
+
+  <p class="one">Why this should work</p>
+  <p>Go back to §I: the brain gradient is only partly renderable because it is born in DINOv2's feature
+  space, which the UNet doesn't share (low \(\alpha\)). But the UNet's <em>own</em> hidden activations at
+  a denoising step — call them \(\phi_t(x_t)\) — are by definition directions the generator can move
+  along cleanly: nudging the latent to change \(\phi_t\) is exactly the kind of change SD renders as a
+  real image. So if a small head can predict "how hard would the ROI fire?" <em>from those internal
+  activations</em>, then differentiating the head sends us along on-manifold directions.</p>
+
+  <p class="anlg"><b>Analogy.</b> Last time (§I) you phoned a painter (the decoder) to translate a wish
+  written in a foreign language (DINOv2) — and got a garbled result. Here you instead <b>hire a native
+  speaker</b>: a small head that reads the generator's own internal language and tells you which way to
+  nudge. Same goal, but now every instruction is one the painter can actually execute.</p>
+
+  <p class="one">The two phases</p>
+  <ul class="gl">
+    <li><b>Offline — teach the head.</b> Take a big pile of images; run the frozen DINOv2 brain-encoder
+    once to get each one's ROI score \(a_V(x)\) (this is the <em>only</em> place DINOv2 is used — as a
+    label maker). Also run SD's noising process and grab its internal features \(\phi_t\) at many noise
+    levels \(t\). Fit a small head \(h_\psi\) (weights \(\psi\)) to predict the score from the features.</li>
+    <li><b>Online — guide with the head.</b> During generation, at each step read the UNet's features
+    \(\phi_t(z_t)\), pass them through \(h_\psi\), and step the latent \(z_t\) up the head's gradient.</li>
+  </ul>
+  \[ \underbrace{h_\psi\!\big(\phi_t(x_t),\,t\big)\approx a_V(x)}_{\text{train offline (UNet + encoder frozen)}}
+     \qquad\Longrightarrow\qquad
+     \underbrace{g_t=\nabla_{z_t}\,h_\psi\!\big(\phi_t(z_t),\,t\big)}_{\text{guide online}}. \]
+
+  <p class="one">What each symbol means</p>
+  <ul class="gl">
+    <li>\(x_t,\,z_t\) — the (noisy) image / its latent at denoising step \(t\).</li>
+    <li>\(\phi_t(\cdot)\) — SD's own hidden activations at step \(t\) (the mid-block + a couple of
+    up-blocks are the standard picks). The "native language."</li>
+    <li>\(h_\psi\) — the small trained head; \(\psi\) its weights. The "native speaker."</li>
+    <li>\(a_V(x)\) — the frozen brain-encoder's ROI score; used offline only, as a training label.</li>
+    <li>\(g_t\) — the guidance nudge added to the latent this step.</li>
+  </ul>
+  <p><b>Why \(\alpha\!\to\!1\):</b> the gradient now flows <em>only</em> through features SD can render,
+  so it lands almost entirely in the honest, on-manifold half \(g_\parallel\). <span class="frozen">The
+  encoder is frozen (labels only) and the UNet is frozen (we read it and train a small head)</span> — and
+  it reuses our existing guided sampler almost verbatim: we just swap "differentiate the encoder" for
+  "differentiate the head."</p>
+  <p class="rcap"><b>Result (Part VII):</b> readout-head scored held-out <b>5/5, +1.67, drop −0.04</b> —
+  honest <em>and</em> the most selective of the realistic methods; the best overall balance in the study.</p>
+
+  <h4 class="rh">Step C — DDPO (option 1): make \(\alpha\) <em>irrelevant</em> by never taking the gradient at all</h4>
+  <p class="one">In one sentence</p>
+  <p>Stop asking the encoder "which way should I nudge the pixels?" (a gradient). Instead just let SD
+  make a whole image, ask the encoder "how good was that?" (a single number), and use trial-and-error to
+  make SD produce high-scoring images more often. No encoder gradient is ever computed, so its
+  off-manifold geometry can't hurt us.</p>
+
+  <p class="one">The reframe: generation as trial-and-error</p>
+  <p>Think of making an image as a sequence of small moves (the ~50 denoising steps). After the last
+  move you have a finished image \(x_0\), and only then do you collect a <b>reward</b> — the brain score:</p>
+  \[ R(x_0)=a_V(x_0)=\frac{1}{|V|}\sum_{v\in V} f_v(x_0)\quad\text{(mean predicted firing over the ROI's voxels).} \]
+  <p class="anlg"><b>Analogy.</b> It's training a dog with treats. You don't grab its legs and move them
+  (that's the gradient — invasive, and it fights you). You let it do a whole trick, then give a treat if
+  you liked it. Do that many times and the behaviours that earned treats become more frequent — without
+  ever micromanaging a single motion.</p>
+
+  <p class="one">The update rule, unpacked</p>
+  <p>Generate a batch of images, score them, and nudge a small set of trainable weights \(\theta\) (a
+  <b>LoRA</b> adapter bolted onto SD) so the moves that led to <em>above-average</em> images become more
+  likely:</p>
+  \[ \nabla_\theta J=\mathbb{E}\!\Big[\textstyle\sum_t\big(R(x_0)-b\big)\,\nabla_\theta\log
+     p_\theta(x_{t-1}\mid x_t)\Big]\;-\;\beta\,\mathrm{KL}\!\big(p_\theta\,\Vert\,p_\text{base}\big). \]
+  <ul class="gl">
+    <li>\(\theta\) — the LoRA weights we train (rank ~8 on the UNet's attention). <span class="frozen">SD's
+    backbone and the encoder stay frozen.</span></li>
+    <li>\(\nabla_\theta\log p_\theta(x_{t-1}\mid x_t)\) — "how do I make the model more likely to take the
+    move it just took?" Multiply that by the reward and you <em>reinforce</em> good moves.</li>
+    <li>\(b\) — a <b>baseline</b>, the batch-average reward. Subtracting it means "reward relative to
+    typical," i.e. <b>graded on a curve</b>: above-average images get pushed up, below-average down. It's
+    the single trick that makes training stable.</li>
+    <li>\(\beta\,\mathrm{KL}(p_\theta\Vert p_\text{base})\) — a <b>leash</b> tying the fine-tuned model to
+    the original SD. This is your <b>realism dial</b>: turn \(\beta\) up the moment images start looking
+    "off," and it can't wander off the natural-image manifold to chase reward.</li>
+  </ul>
+
+  <p><b>Why \(\alpha\) disappears entirely:</b> the encoder shows up only as the plain number \(R\) — it
+  is <em>never differentiated</em>. So its adversarial directions, its low \(\alpha\), its whole geometry
+  are simply <em>gone</em> (not dampened like plans 1–2 — gone), because the thing being optimized is SD
+  itself, which already knows what real images look like. Optimizing the score <em>directly</em> while
+  leashed to realism is why DDPO is the one route that can plausibly win on realism <em>and</em>
+  selectivity at once — the survey's top pick.</p>
+  <p class="anlg"><b>The catch.</b> Trial-and-error is sample-hungry (many generations per round), and the
+  dog may learn to <em>cheat</em> — find weird images that spike our encoder without being meaningful
+  (reward hacking). That is exactly why Step&nbsp;A's <b>held-out encoder</b> is the guardrail: if the
+  independent judge disagrees, the reward was hacked.</p>
+  <p class="rcap"><b>Result (Part VII):</b> at demo scale (30 rounds × 8 = 240 samples) DDPO reached only
+  <b>2/5, +0.39 held-out</b> — sample-starved, not broken. Reward moved on 3/5 ROIs; a full-scale run
+  (hundreds of rounds) is what realizes option 1's ceiling.</p>
+
+  <div class="cbox">
+    <h4>Why this order</h4>
+    <p><b>Measure → readout-head → DDPO.</b> The scoring harness comes first because it is <em>also</em>
+    the reward for DDPO and the label source for the readout head — and it is how we will know whether
+    any of this actually beat plan&nbsp;4. Readout-head is next because it reuses our sampler and is
+    plain guidance (fast, low-risk). DDPO is last: the biggest lift and the most compute, taken on only
+    if we still need more selectivity than readout-head delivers.</p>
+  </div>
+</div>
+'''
+
+EXTRA_CSS = '''
+<style id="results-style">
+  .rh{font-size:15px;color:var(--accent2);margin:26px 0 6px;letter-spacing:.02em}
+  .rcap{color:var(--muted);font-size:14px;margin:10px 0 4px}
+  .rnote,.cbox{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
+    border-radius:10px;padding:14px 16px;margin:18px 0;color:var(--ink);font-size:14.5px}
+  .cbox{border-left-color:var(--accent2)}
+  .cbox h4{margin:0 0 8px;font-size:15px;color:var(--ink)}
+  .cbox p{margin:0 0 9px} .cbox p:last-child{margin:0}
+  .frozen{color:var(--good);font-weight:700}
+  .rewardfig{display:block;max-width:520px;width:100%;height:auto;border:1px solid var(--line);
+    border-radius:8px;margin:10px 0;background:#fff}
+  .gl{margin:6px 0 14px;padding-left:20px;font-size:14.5px;color:var(--muted)}
+  .gl li{margin:6px 0} .gl b{color:var(--ink)}
+  .anlg{color:var(--muted);border-left:2px solid var(--accent2);padding:2px 0 2px 14px;margin:12px 0;
+    font-size:14.5px}
+  .anlg b{color:var(--ink)}
+  .one{font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--accent);margin:14px 0 2px}
+  .seltab{border-collapse:collapse;margin:8px 0 16px;font-size:13.5px}
+  .seltab th,.seltab td{border:1px solid var(--line);padding:6px 14px;text-align:left;
+    font-variant-numeric:tabular-nums}
+  .seltab th{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.05em}
+  .hmwrap{display:flex;flex-wrap:wrap;gap:14px;margin:12px 0}
+  .hm{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--panel)}
+  .hmt{font:11px ui-monospace,Menlo,monospace;color:var(--accent2);margin-bottom:5px;text-align:center}
+  .hmtab{border-collapse:collapse}
+  .hmtab td{width:34px;height:26px;text-align:center;font:10px ui-monospace,Menlo,monospace;
+    color:var(--ink);border:1px solid var(--line)}
+  .hmtab td.hc{background:transparent;color:var(--muted);border:none;font-size:9px}
+  .rgw{overflow-x:auto;margin:12px 0}
+  .rg{min-width:calc(96px + var(--n)*128px)}
+  .rrow{display:grid;grid-template-columns:90px repeat(var(--n),1fr);gap:8px;align-items:center;margin-top:8px}
+  .rhead{margin-top:0}
+  .ch{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-align:center;line-height:1.3}
+  .rl{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);text-align:right;padding-right:2px}
+  .rc{aspect-ratio:1;border-radius:7px;overflow:hidden;background:var(--panel2);border:1px solid var(--line)}
+  .rc img{display:block;width:100%;height:100%;object-fit:cover}
+  .rc .miss{display:flex;height:100%;align-items:center;justify-content:center;
+    font:11px ui-monospace,monospace;color:var(--muted)}
+</style>
+'''
+
+# ---- assemble: strip <head> wrapper, inline MathJax, inject results + css ----
+body = ORIG[ORIG.find("<body"):ORIG.rfind("</body>")]
+body = body[body.find(">")+1:]                       # drop the <body ...> tag itself
+# insert Results before the last top-level part (References)
+idx = body.rfind('class="part"')
+open_idx = body.rfind('<', 0, idx)
+body = body[:open_idx] + RESULTS + NEXTSTEPS + body[open_idx:]
+# add a TOC entry (insert before the toc's closing </ol>)
+tj = body.find('class="toc"')
+if tj > 0:
+    ol_end = body.find('</ol>', tj)
+    toc_add = ('<li><a href="#results">Part VII &middot; Results (with images)</a></li>'
+               '<li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li>')
+    body = body[:ol_end] + toc_add + body[ol_end:]
+
+# extract original <style> and MathJax config from head
+style = re.search(r'<style>.*?</style>', ORIG, re.S).group(0)
+mjcfg = re.search(r'<script>\s*window\.MathJax.*?</script>', ORIG, re.S).group(0)
+
+page = (
+    '<title>Guiding a Brain Encoder to Synthesize Images — teaching guide + results</title>\n'
+    + mjcfg + '\n'
+    + '<script>\n' + MJS + '\n</script>\n'
+    + style + '\n'
+    + EXTRA_CSS + '\n'
+    + body
+)
+OUT.write_text(page)
+print("wrote", OUT, f"({len(page)//1024} KB)  images≈{page.count('data:image/jpeg')}")

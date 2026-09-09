@@ -1,0 +1,45 @@
+# TEST 1 — Gradient hygiene on the universal (DINOv2) encoder.
+# Same universal encoder + same ROI-independent normalized step as the baseline,
+# PLUS: augmentation-averaged (cutout) brain gradient + TV/range regularizers.
+# Goal: de-adversarialize the DINOv2 gradient so guidance yields photos, not texture.
+# Everything else is identical to configs/universal.yaml so the ONLY variables are
+# the hygiene knobs -> a clean A/B vs. baseline_universal.
+device: auto
+model_id: runwayml/stable-diffusion-v1-5
+
+encoder:
+  name: universal
+  code_path: brainit-fmri
+  checkpoint: brainit-fmri/results/saved_models/encoder_ch128.pth
+  backbone: dinov2_vitl14_reg
+  inner_ch: 128
+  select_layers: [1, 6, 12, 18, 24]
+  num_reg_tokens: 4
+  include_reg_tokens: false
+  backbone_image_size: 224
+
+steer:
+  voxels: {start: 0, stop: 500}   # overridden per-ROI via --voxels
+  sign: -1.0                      # -1 MAXIMIZES ROI activation (verified)
+  reduce: mean
+
+# --- the test ---------------------------------------------------------------
+hygiene:
+  cutouts: 8      # random-resized crops averaged per step (0 = baseline). 8 is a
+                  # speed/quality compromise; Disco uses 16-64. Kills per-pixel
+                  # adversarial directions that don't agree across crops.
+  cut_pow: 1.0    # crop-size distribution skew
+  tv: 120.0       # total-variation weight: penalizes checkerboard/high-freq texture
+  range: 50.0     # penalizes out-of-[0,1] (blown-out contrast)
+
+generate:
+  prompt: ""
+  scheduler: dpm            # keep the baseline scheduler; isolate the hygiene effect
+  num_inference_steps: 50
+  guidance_scale: 7.5
+  sag_scale: 0.0
+  clip_guidance_scale: 0.30 # same tuned strength as baseline
+  num_images_per_prompt: 1
+  seed: 0
+
+out_dir: experiments/test1_gradient_hygiene/outputs

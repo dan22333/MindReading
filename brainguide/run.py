@@ -15,9 +15,22 @@ import argparse
 from pathlib import Path
 
 import torch
+import torch.nn as nn
 import yaml
 
 from brainguide import build_encoder, make_brain_tweak
+
+
+class ReadoutHead(nn.Module):
+    """TEST 3 head: pooled UNet mid-block features (+ t) -> per-ROI score.
+    Architecture must match experiments/test3_readout_head/train_heads.py::Head."""
+    def __init__(self, din=1280, nroi=5, h=512):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(din + 1, h), nn.GELU(),
+                                 nn.Linear(h, h), nn.GELU(), nn.Linear(h, nroi))
+
+    def forward(self, feat, t):
+        return self.net(torch.cat([feat, t[:, None]], 1))
 
 
 def pick_device(requested: str) -> str:
@@ -88,7 +101,7 @@ def smoke(cfg):
 
 def generate(cfg, args):
     from brainguide.pipeline import mypipelineSAG
-    from diffusers import DPMSolverMultistepScheduler
+    from diffusers import DPMSolverMultistepScheduler, DDIMScheduler
 
     device, encoder, voxels, tweak = build(cfg, voxels_override=args.voxels)
     gen_cfg = dict(cfg.get("generate", {}))
@@ -105,9 +118,47 @@ def generate(cfg, args):
     # black 842-byte image — a false positive that looks identical to a failed
     # generation. Disable it so every ROI returns its actual image.
     pipe.safety_checker = None
-    pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+    # Scheduler: DPM-Solver++ is the tuned baseline. Time-travel/resampling
+    # (test 2) needs a stateless Markovian step, so it selects DDIM.
+    sched_name = str(args.scheduler if args.scheduler is not None else gen_cfg.get("scheduler", "dpm")).lower()
+    if sched_name == "ddim":
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    else:
+        pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
     pipe = pipe.to(device)
     pipe.brain_tweak = tweak  # <-- the entire brain->image coupling
+
+    # --- Test 3 (readout-head guidance): differentiate a head on the UNet's own
+    # mid-block features instead of the encoder. Gated by --readout-head.
+    if args.readout_head:
+        ck = torch.load(args.readout_head, map_location=device, weights_only=False)
+        head = ReadoutHead(din=int(ck.get("din", 1280)), nroi=len(ck["rois"]))
+        head.load_state_dict(ck["state"]); head.to(device).eval()
+        for p in head.parameters():
+            p.requires_grad_(False)
+        pipe._mid_feats = {}
+        pipe.unet.mid_block.register_forward_hook(
+            lambda m, i, o: pipe._mid_feats.__setitem__("h", o))
+        pipe.readout_head = head
+        roi_name = args.readout_roi or "faces"
+        pipe.readout_roi = ck["rois"].index(roi_name)
+        print(f"[gen] readout-head ON: target ROI '{roi_name}' (idx {pipe.readout_roi} of {ck['rois']})")
+
+    # --- Test 1 (gradient hygiene) + Test 2 (time-travel) knobs from config ---
+    # Every one defaults to the baseline value, so an untouched config == before.
+    hyg = dict(cfg.get("hygiene", {}))
+    pipe.hygiene_cutouts = int(args.cutouts if args.cutouts is not None else hyg.get("cutouts", 0))
+    pipe.hygiene_cut_pow = float(hyg.get("cut_pow", 1.0))
+    pipe.hygiene_tv      = float(args.tv if args.tv is not None else hyg.get("tv", 0.0))
+    pipe.hygiene_range   = float(args.range_w if args.range_w is not None else hyg.get("range", 0.0))
+    tt = dict(cfg.get("timetravel", {}))
+    pipe.timetravel_reps = int(args.tt_reps if args.tt_reps is not None else tt.get("reps", 1))
+    pipe.timetravel_lo   = float(tt.get("lo", 0.10))
+    pipe.timetravel_hi   = float(tt.get("hi", 0.60))
+    if pipe.hygiene_cutouts or pipe.timetravel_reps > 1 or pipe.hygiene_tv or pipe.hygiene_range:
+        print(f"[gen] hygiene: cutouts={pipe.hygiene_cutouts} tv={pipe.hygiene_tv} "
+              f"range={pipe.hygiene_range} | timetravel: reps={pipe.timetravel_reps} "
+              f"win=[{pipe.timetravel_lo},{pipe.timetravel_hi}] sched={sched_name}")
 
     # BrainDiVE-style: empty prompt (pass --prompt "") lets the brain gradient,
     # not text, drive the content. args.prompt="" is honored (only None falls back).
@@ -154,6 +205,16 @@ def main():
     ap.add_argument("--tag", default=None, help="label for output filenames")
     ap.add_argument("--clip-scale", dest="clip_scale", type=float, default=None,
                     help="override generate.clip_guidance_scale (guidance strength)")
+    # experiment knobs (test 1 / test 2) — override the config's hygiene/timetravel
+    ap.add_argument("--cutouts", type=int, default=None, help="test1: N augmentation crops (0=off)")
+    ap.add_argument("--tv", type=float, default=None, help="test1: total-variation weight")
+    ap.add_argument("--range", dest="range_w", type=float, default=None, help="test1: out-of-range penalty")
+    ap.add_argument("--tt-reps", dest="tt_reps", type=int, default=None, help="test2: time-travel repeats (1=off)")
+    ap.add_argument("--scheduler", default=None, help="dpm|ddim (ddim required for time-travel)")
+    ap.add_argument("--readout-head", dest="readout_head", default=None,
+                    help="test3: path to readout_head.pt (guide via UNet-feature head)")
+    ap.add_argument("--readout-roi", dest="readout_roi", default=None,
+                    help="test3: target ROI name for the readout head")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
