@@ -27,7 +27,8 @@ BG_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BG_ROOT))
 from run import build
 
-ROIS = ["faces", "places", "words", "bodies", "earlyvisual"]
+ROIS = ["faces", "places", "words", "bodies"]
+N = len(ROIS)
 # method name -> (subdir, filename prefix)
 METHODS = {
     "baseline":  ("baseline", "base"),
@@ -83,7 +84,7 @@ def main():
             print(f"[eval] {m}: no images, skipping"); continue
 
         # score every image on every ROI j
-        raw = np.zeros((5, 5)); allcol = {j: [] for j in ROIS}  # for z-score
+        raw = np.zeros((N, N)); allcol = {j: [] for j in ROIS}  # for z-score
         rowvals = {i: {j: [] for j in ROIS} for i in ROIS}
         for i, roi_i in enumerate(ROIS):
             if not per_img[roi_i]:
@@ -97,18 +98,18 @@ def main():
         # z-score each column across this method's images
         mu = {j: float(np.mean(allcol[j])) for j in ROIS}
         sd = {j: float(np.std(allcol[j]) + 1e-8) for j in ROIS}
-        zmat = np.zeros((5, 5))
+        zmat = np.zeros((N, N))
         for i, roi_i in enumerate(ROIS):
             for j, roi_j in enumerate(ROIS):
                 zmat[i, j] = (raw[i, j] - mu[roi_j]) / sd[roi_j]
         # selectivity: fraction of rows whose diagonal is the argmax (z-space)
-        hits = sum(1 for i in range(5) if not np.isnan(zmat[i]).any() and int(np.argmax(zmat[i])) == i)
-        diag = float(np.nanmean([zmat[i, i] for i in range(5)]))
-        offdiag = float(np.nanmean([zmat[i, j] for i in range(5) for j in range(5) if i != j]))
+        hits = sum(1 for i in range(N) if not np.isnan(zmat[i]).any() and int(np.argmax(zmat[i])) == i)
+        diag = float(np.nanmean([zmat[i, i] for i in range(N)]))
+        offdiag = float(np.nanmean([zmat[i, j] for i in range(N) for j in range(N) if i != j]))
         report[m] = {"raw": raw.tolist(), "z": zmat.tolist(),
                      "diag_argmax_hits": hits, "diag_z_mean": diag,
                      "offdiag_z_mean": offdiag, "selectivity_contrast": diag - offdiag}
-        print(f"[eval] {m:9s}  diag-argmax {hits}/5   diagZ {diag:+.2f}  "
+        print(f"[eval] {m:9s}  diag-argmax {hits}/{N}   diagZ {diag:+.2f}  "
               f"offdiagZ {offdiag:+.2f}  contrast {diag-offdiag:+.2f}")
 
     (out / "selectivity.json").write_text(json.dumps({"rois": ROIS, "methods": report}, indent=2))

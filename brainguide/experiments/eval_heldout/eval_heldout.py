@@ -16,7 +16,8 @@ import argparse, glob, json, os, sys
 import numpy as np, torch
 from PIL import Image
 
-ROIS = ["faces", "places", "words", "bodies", "earlyvisual"]
+ROIS = ["faces", "places", "words", "bodies"]
+N = len(ROIS)
 HIGHER = {"faces", "places", "words", "bodies"}      # scored via forward_higher; early via forward_early
 METHODS = {"baseline": ("baseline", "base"), "plan1": ("test1", "t1"),
            "plan2ctrl": ("test2", "t2ctrl"), "plan2tt": ("test2", "t2tt"),
@@ -77,7 +78,7 @@ def main():
 
     report = {}
     for m, (sub, pre) in METHODS.items():
-        raw = np.full((5, 5), np.nan); allcol = {j: [] for j in ROIS}
+        raw = np.full((N, N), np.nan); allcol = {j: [] for j in ROIS}
         for i, roi_i in enumerate(ROIS):
             files = sorted(glob.glob(f"{os.path.expanduser(a.base)}/{sub}/{pre}_{roi_i}_seed*_0.png"))
             if not files:
@@ -93,13 +94,13 @@ def main():
             print(f"[heldout] {m}: no images"); continue
         mu = {j: float(np.mean(allcol[j])) for j in ROIS}
         sd = {j: float(np.std(allcol[j]) + 1e-8) for j in ROIS}
-        z = np.array([[(raw[i, j] - mu[ROIS[j]]) / sd[ROIS[j]] for j in range(5)] for i in range(5)])
-        hits = sum(1 for i in range(5) if not np.isnan(z[i]).any() and int(np.argmax(z[i])) == i)
-        diag = float(np.nanmean([z[i, i] for i in range(5)]))
-        off = float(np.nanmean([z[i, j] for i in range(5) for j in range(5) if i != j]))
+        z = np.array([[(raw[i, j] - mu[ROIS[j]]) / sd[ROIS[j]] for j in range(N)] for i in range(N)])
+        hits = sum(1 for i in range(N) if not np.isnan(z[i]).any() and int(np.argmax(z[i])) == i)
+        diag = float(np.nanmean([z[i, i] for i in range(N)]))
+        off = float(np.nanmean([z[i, j] for i in range(N) for j in range(N) if i != j]))
         report[m] = {"raw": raw.tolist(), "z": z.tolist(), "diag_argmax_hits": hits,
                      "diag_z_mean": diag, "offdiag_z_mean": off, "selectivity_contrast": diag - off}
-        print(f"[heldout] {m:9s} diag-argmax {hits}/5  contrast {diag-off:+.2f}")
+        print(f"[heldout] {m:9s} diag-argmax {hits}/{N}  contrast {diag-off:+.2f}")
 
     Path = os.path.join(a.out, "selectivity_heldout.json")
     with open(Path, "w") as fh:

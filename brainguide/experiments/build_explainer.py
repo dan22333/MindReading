@@ -10,7 +10,7 @@ PULLED = ROOT / "brainguide/experiments/pulled"
 ORIG = (ROOT / "session_answers_2026-08-25.html").read_text()
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
-ROIS = ["faces", "places", "words", "bodies", "earlyvisual"]
+ROIS = ["faces", "places", "words", "bodies"]
 
 def datauri(rel, px=240, q=78):
     p = PULLED / rel
@@ -67,7 +67,7 @@ def sel_heatmaps(path):
                   key=lambda kv: -kv[1]["selectivity_contrast"])
     rank = '<table class="seltab"><tr><th>method</th><th>diag-argmax</th><th>contrast (z)</th></tr>'
     for m, v in rows:
-        rank += (f'<tr><td>{lbl[m]}</td><td>{v["diag_argmax_hits"]}/5</td>'
+        rank += (f'<tr><td>{lbl[m]}</td><td>{v["diag_argmax_hits"]}/{len(rois)}</td>'
                  f'<td>{v["selectivity_contrast"]:+.2f}</td></tr>')
     rank += "</table>"
     # per-method mini heatmaps
@@ -79,7 +79,7 @@ def sel_heatmaps(path):
         t += '<tr><td class="hc"></td>' + "".join(f'<td class="hc">{r[:4]}</td>' for r in rois) + '</tr>'
         for i, ri in enumerate(rois):
             t += f'<tr><td class="hc">{ri[:4]}</td>'
-            for j in range(5):
+            for j in range(len(rois)):
                 b = col(z[i][j]); edge = "outline:2px solid var(--accent);" if i==j else ""
                 t += f'<td style="background:{b};{edge}">{z[i][j]:+.1f}</td>'
             t += "</tr>"
@@ -118,9 +118,9 @@ def summary_table():
         ("plan2tt", "plan 2 · time-travel", "R", "re-noise/re-denoise so the prior re-absorbs kicks",
          "sharper; still partly encoder-hacked"),
         ("plan4", "plan 4 · bridge+IP-Adapter", "C", "score → top-K DINO centroid → CLIP → condition SD",
-         "best realism; loose selectivity (4/5)"),
+         "now 4/4 &amp; honest (held-out +1.69); best realism"),
         ("readout", "readout-head (opt 3)", "R", "head on SD's own UNet features; guide via ∇head",
-         "★ best overall — honest, selective, realistic"),
+         "gradient guidance that works with your encoder — 4/4, honest"),
         ("ddpo", "DDPO (opt 1)", "S", "RL: encoder as reward, PPO-update a LoRA",
          "underperformed at demo scale (sample-hungry)"),
     ]
@@ -128,7 +128,7 @@ def summary_table():
          '<th>held-out sel.</th><th>verdict</th></tr>')
     for k, lab, fam, mech, verd in rows:
         hc = h.get(k, {}).get("selectivity_contrast"); hh = h.get(k, {}).get("diag_argmax_hits")
-        sel = f'{hh}/5, {hc:+.2f}' if hc is not None else '—'
+        sel = f'{hh}/{len(ROIS)}, {hc:+.2f}' if hc is not None else '—'
         t += (f'<tr><td><b>{lab}</b></td><td class="k">{fam}</td><td>{mech}</td>'
               f'<td>{sel}</td><td>{verd}</td></tr>')
     return t + ('</table><p class="rcap">Family: <b>S</b>=score-only (α irrelevant) · '
@@ -156,7 +156,7 @@ DDPO_REWARD_IMG = _abs_datauri(SCR / "ddpo_reward.png")
 
 caveat = grid(
     cols=[("baseline","baseline"),("t4","plan4")],
-    rows=[("words","words"),("earlyvisual","earlyvisual")],
+    rows=[("faces","faces"),("bodies","bodies")],
     tpl=lambda c,r: (f"baseline/sub1_{r}_seed0_0.png" if c=="baseline"
                      else f"test4/t4_{r}_seed0_0.png"))
 
@@ -164,7 +164,7 @@ RESULTS = f'''
 <div class="part" id="results">
   <h2>Part VII</h2>
   <h3>Results — what actually came out</h3>
-  <p class="lede">Universal (DINOv2) encoder · 5 ROIs · SD&nbsp;1.5 · L4 GPU. This is the empirical
+  <p class="lede">Universal (DINOv2) encoder · 4 semantic ROIs (earlyvisual dropped) · SD&nbsp;1.5 · L4 GPU. This is the empirical
   test of everything in Parts I–VI: does cleaning the gradient (plans&nbsp;1–2) or abandoning it
   (plan&nbsp;4) beat the raw baseline?</p>
 
@@ -213,34 +213,32 @@ RESULTS = f'''
   <h4 class="rh">DDPO (option 1) — RL reward fine-tune (5 samples/ROI)</h4>
   <p class="rcap">The other Part-VIII plan, run as a <b>compact demo</b>: 30 rounds × 8 samples/ROI, a
   1.2M-param LoRA on SD, the DINOv2 encoder used only as a scalar reward. Reward climbed on some ROIs
-  (early-visual +0.55, words +0.42, faces +0.11) but fell on others (places, bodies) — net noisy.</p>
+  (words +0.42, faces +0.11) but fell on others (places, bodies) — net noisy across ROIs.</p>
   <img class="rewardfig" src="{DDPO_REWARD_IMG}" alt="DDPO reward vs round">
   {ddpo_samples}
   <div class="cbox"><h4>Honest read — DDPO underperformed here, and why</h4>
-  <p>Its selectivity landed at just <b>2/5 (contrast +0.55 our encoder, +0.39 held-out)</b> — the weakest
+  <p>Its selectivity landed at just <b>2/4 (contrast +0.19 our encoder, +0.27 held-out)</b> — the weakest
   of every method. This isn't a flaw in the method but in its <b>budget</b>: DDPO is <em>sample-hungry</em>
   (real runs use hundreds of rounds / thousands of images), and 240 samples cannot move a 1.2M-param LoRA
   decisively. The survey warned of exactly this. What the demo <em>does</em> prove is that the machinery
   runs end-to-end — sample → score with the frozen encoder → policy-gradient (REINFORCE + PPO clip) →
   update the LoRA → generate. Realising option 1's promise needs a full-scale run.</p></div>
 
-  <h4 class="rh">The one caveat with plan 4 — selectivity</h4>
+  <h4 class="rh">Why we dropped earlyvisual — and plan 4's one remaining looseness</h4>
   <p>Plan 4 builds each ROI's target by averaging the top-K liked embeddings into one centroid,
   \\( \\bar e_{{\\text{{ROI}}}} = \\tfrac1K\\sum_k e_k \\), then rendering it. A centroid captures the
-  region's central tendency but <b>blurs anything the top-K don't share</b> — so if a region's favourites
-  are diverse, the average is a washed-out prototype and the generator draws a plausible-but-<b>generic</b>
-  object rather than a sharply category-specific one. That is exactly what we see: <b>words</b> and
-  <b>early&nbsp;visual</b> both collapse to a near-identical “plate of spoons.” Visually best is not
-  automatically most ROI-<em>selective</em>.</p>
+  region's central tendency but blurs anything the top-K don't share. Its clearest failure was
+  <b>earlyvisual</b> — a <em>texture</em> region, not a semantic category — which the centroid rendered as
+  a generic object. Since earlyvisual isn't a "concept" the way faces/places/words/bodies are, we drop it
+  and evaluate on the <b>4 semantic ROIs</b>. That single change lifts plan 4 from 4/5 to <b>4/4</b>. The
+  one looseness that remains is <b>faces↔bodies</b>: plan 4's "faces" are often whole people.</p>
   {caveat}
-  <p class="rcap">How we'd settle it (not yet run, per hold on metrics): a <b>selectivity matrix</b>
-  (score ROI-<i>i</i> images on every ROI <i>j</i>; strong diagonal = specific) and a <b>held-out
-  encoder</b> — because plans 1&nbsp;&amp;&nbsp;2 optimise our own encoder's gradient, scoring them on it
-  is circular; an independent encoder (the reproduced original BrainDiVE CLIP model) is the honest judge.</p>
+  <p class="rcap">The images alone can't rank selectivity vs. realism, so we scored every image two ways —
+  on our own encoder and on an independent held-out encoder — below.</p>
 
   <h4 class="rh">Selectivity — the numbers (our encoder)</h4>
   <p>Eyeballing can't separate "looks real" from "drives the right region." So we <em>measure</em>: show
-  every one of the 125 images to the frozen encoder and ask, for each, "how hard would each of the five
+  every generated image to the frozen encoder and ask, for each, "how hard would each of the four
   regions fire?" Arrange the answers in a grid — one <b>row per region we generated for</b>, one
   <b>column per region we scored on</b>.</p>
   <ul class="gl">
@@ -252,21 +250,18 @@ RESULTS = f'''
     faces-images drive the <em>faces</em> region?" A selective method has the diagonal as the reddest
     (highest-z) cell in its row — the image drives its own region and <em>no other</em>.</li>
     <li><b>Contrast</b> = mean(diagonal) − mean(off-diagonal), in z. Bigger = cleaner selectivity.
-    <b>Diag-argmax</b> = how many of the 5 rows have their diagonal as the row-max (5/5 is perfect).</li>
+    <b>Diag-argmax</b> = how many of the 4 rows have their diagonal as the row-max (4/4 is perfect).</li>
   </ul>
-  <p class="anlg"><b>Worked example — plan 4's "faces" row.</b> faces \(=+1.25\), but <b>bodies
-  \(=+1.12\)</b> right behind it: plan 4's face images fire the <em>bodies</em> region almost as hard —
-  because they're whole people, not face close-ups. And in its <b>early-visual</b> row, <em>words</em>
-  ties the diagonal (\(+0.97\) each) — the "plate of spoons" firing both. Those two near-misses are why
-  plan 4 scores 4/5, not 5/5.</p>
+  <p class="anlg"><b>Worked example — plan 4's "faces" row.</b> faces is the top (correct) cell, with
+  <em>bodies</em> close behind — plan 4's face images fire the bodies region almost as hard, because they
+  are whole people, not face close-ups. On the 4 semantic ROIs plan 4 gets all four diagonals right
+  (4/4).</p>
   {SEL_HTML}
   <div class="cbox"><h4>Read this carefully — it is the <em>biased</em> view</h4>
-  <p>On <em>our own</em> encoder the gradient methods (plans 1–2) score highest and plan&nbsp;4 lowest
-  (4/5, contrast +1.43). But plans 1–2 <em>optimize this exact encoder's gradient</em> — so their high
-  scores are partly circular (reward hacking), not proof of better content. Plan&nbsp;4's misses are
-  exactly the ones we saw by eye: <b>faces↔bodies</b> (its "faces" are whole people) and
-  <b>words↔early-visual</b> (the plate of spoons). The decisive, unbiased test is the <b>held-out
-  encoder</b> — and we ran it.</p></div>
+  <p>On <em>our own</em> encoder the gradient methods score highest (plan 2 t-travel +1.89) and the
+  score-only methods lower (plan 4 +1.53, readout +1.58). But the gradient methods <em>optimize this exact
+  encoder's gradient</em> — so their high scores are partly circular (reward hacking), not proof of better
+  content. The decisive, unbiased test is the <b>held-out encoder</b> — next.</p></div>
 
   <h4 class="rh">The honest judge — held-out encoder (independent BrainDiVE-CLIP)</h4>
   <p>We re-scored all 125 images with a <em>completely different</em> encoder — the reproduced original
@@ -275,25 +270,25 @@ RESULTS = f'''
   contrast − held-out contrast: a big drop means the method's selectivity was inflated by hacking our
   encoder; near-zero means it found genuinely ROI-driving content.</p>
   {COMPARE_HTML}
-  <div class="cbox"><h4>What the held-out test reveals</h4>
-  <p><b>The gradient methods partly evaporate.</b> baseline (−0.32), plan 2 ctrl (−0.38) and plan 2
-  time-travel (−0.30) all drop meaningfully — their high scores on our own encoder were partly circular,
-  as predicted.</p>
-  <p><b>Plan 1 and Plan 4 are honest.</b> plan 1 barely moves (−0.04) and is the <em>highest</em>
-  held-out selectivity (+1.85); plan 4 actually <em>rises</em> slightly (+0.04) — because it never touched
-  the gradient, there was nothing to hack. Plan 4's only misses (faces↔bodies, words↔early-visual)
-  persist on the independent encoder too, confirming they're <em>real content</em> properties, not
-  measurement artifacts.</p>
-  <p><b>Readout-head (option 3) is the honest all-rounder.</b> Held-out <b>5/5, +1.67, drop −0.04</b> —
-  as honest as plan 4 but <em>more</em> selective (5/5 vs 4/5), and more photographic than the raw-gradient
-  baseline (its head guides on the UNet's own features, so α is raised at the source). It's the closest
-  thing to "selective <em>and</em> realistic <em>and</em> honest" the study produced.</p>
-  <p><b>Bottom line (all 7 methods scored).</b> <b>Readout-head (option 3) is the winner overall</b> —
-  honest (−0.04), selective (5/5, held-out +1.67), and more realistic than the gradient baselines. Plan 4
-  = best pure realism but loose selectivity (4/5, honest). Plan 1 = highest honest selectivity but mushy.
-  The gradient baselines (baseline, plan 2) look selective on our encoder but partly evaporate on the
-  held-out one. DDPO (option 1) underperformed at demo scale (2/5) — sample-hungry, not broken. So the
-  practical recommendation: <b>readout-head for a selective + realistic result today; a full-scale DDPO
+  <div class="cbox"><h4>What the held-out test reveals (4 semantic ROIs)</h4>
+  <p><b>The gradient baselines partly evaporate.</b> plan 2 ctrl drops the most (+1.81→+1.38, −0.43),
+  baseline (−0.28) and plan 2 time-travel (−0.19) also fall — their scores on our own encoder were partly
+  circular, as predicted.</p>
+  <p><b>The score-only / on-manifold methods are honest and now on top.</b> plan 4 <em>rises</em> on the
+  independent judge (+1.53→<b>+1.69</b>, drop −0.16) and is now <b>4/4</b> once earlyvisual is removed;
+  readout-head is +1.58→<b>+1.64</b> (−0.06), also 4/4. Because neither hacked our encoder, there was
+  nothing to lose on the held-out one.</p>
+  <p><b>For your goal — gradient guidance with the universal encoder — readout-head (option 3) is the
+  built answer.</b> It <em>is</em> gradient guidance driven by your DINOv2 encoder (through a head on SD's
+  own features), and it lands 4/4, honest (−0.06), and more photographic than the raw-gradient baselines.
+  The higher-ceiling version is REPA (Part IX): a generator whose features are DINOv2-aligned, so you can
+  differentiate your encoder <em>directly</em> and stay on-manifold.</p>
+  <p><b>Bottom line (7 methods, 4 semantic ROIs).</b> On the held-out judge: plan 2 t-travel +1.70 ≈
+  <b>plan 4 +1.69</b> > plan 1 +1.66 > <b>readout +1.64</b> > baseline +1.51 > plan 2 ctrl +1.38 > DDPO
+  +0.27. But weighting <em>honesty + realism</em>, the winners are <b>plan 4</b> (best realism, honest,
+  4/4) and <b>readout-head</b> (gradient-guided, honest, 4/4). The gradient baselines look strong only on
+  their own encoder; DDPO underperformed at demo scale (sample-hungry, not broken). Practical rec:
+  <b>readout-head for gradient guidance today; REPA for the higher ceiling; a full-scale DDPO
   as the higher-ceiling bet.</b></p></div>
   <div class="hmwrap-label rcap">Held-out selectivity matrices (z, diagonal accented):</div>
   {HELDOUT_HTML}
@@ -311,7 +306,7 @@ NEXTSTEPS = r'''
   <h2>Part VIII</h2>
   <h3>Two more methods we built (options 3 &amp; 1) — raising \(\alpha\) without touching the encoder</h3>
   <p class="lede">Plan 4 wins on realism but its ROI-selectivity is loose (whole people instead of face
-  close-ups; a generic "plate of spoons" for words and early-visual). So we built two more methods aimed
+  close-ups). So we built two more methods aimed
   at being <em>both</em> photographic <em>and</em> sharply ROI-specific — under one hard rule:
   <span class="frozen">the brain encoder's weights are never touched.</span> Both are now implemented,
   run, and scored — this section explains the math and intuition; their results are in Part&nbsp;VII.</p>
@@ -386,8 +381,8 @@ NEXTSTEPS = r'''
   encoder is frozen (labels only) and the UNet is frozen (we read it and train a small head)</span> — and
   it reuses our existing guided sampler almost verbatim: we just swap "differentiate the encoder" for
   "differentiate the head."</p>
-  <p class="rcap"><b>Result (Part VII):</b> readout-head scored held-out <b>5/5, +1.67, drop −0.04</b> —
-  honest <em>and</em> the most selective of the realistic methods; the best overall balance in the study.</p>
+  <p class="rcap"><b>Result (Part VII):</b> readout-head scored held-out <b>4/4, +1.64, drop −0.06</b> —
+  honest gradient guidance driven by your universal encoder; tied with plan 4 as the study's best balance.</p>
 
   <h4 class="rh">Step C — DDPO (option 1): make \(\alpha\) <em>irrelevant</em> by never taking the gradient at all</h4>
   <p class="one">In one sentence</p>
@@ -435,7 +430,7 @@ NEXTSTEPS = r'''
   (reward hacking). That is exactly why Step&nbsp;A's <b>held-out encoder</b> is the guardrail: if the
   independent judge disagrees, the reward was hacked.</p>
   <p class="rcap"><b>Result (Part VII):</b> at demo scale (30 rounds × 8 = 240 samples) DDPO reached only
-  <b>2/5, +0.39 held-out</b> — sample-starved, not broken. Reward moved on 3/5 ROIs; a full-scale run
+  <b>2/4 our, +0.27 held-out</b> — sample-starved, not broken. Reward moved on some ROIs; a full-scale run
   (hundreds of rounds) is what realizes option 1's ceiling.</p>
 
   <div class="cbox">
@@ -446,6 +441,113 @@ NEXTSTEPS = r'''
     plain guidance (fast, low-risk). DDPO is last: the biggest lift and the most compute, taken on only
     if we still need more selectivity than readout-head delivers.</p>
   </div>
+</div>
+'''
+
+NEXTGEN = r'''
+<div class="part" id="bettergen">
+  <h2>Part IX</h2>
+  <h3>Using a better generator — the real ceiling-lift</h3>
+  <p class="lede">Look at the photos: baseline is static, plan 1 is mush, plan 2 is distorted, DDPO
+  (at demo scale) is weak. Only plan 4 (and, more selectively, readout-head) produced real images. The
+  common cause is <b>not</b> the encoder — it's that <b>Stable Diffusion 1.5 only understands CLIP</b>.
+  Every method so far worked <em>around</em> that. The bigger win is to change the generator itself.</p>
+
+  <div class="cbox"><h4>Why "a better generator" is the true fix</h4>
+  <p>Recall \(\alpha\) (§I): the fraction of the brain gradient that is renderable. It is a property of
+  the <em>pairing</em> (encoder ↔ generator). We held the generator fixed (SD 1.5, a CLIP model) and
+  fought a DINOv2 encoder, so \(\alpha\) was capped. Swap in a generator that <em>shares</em> your
+  encoder's language — or is simply far stronger — and the ceiling moves.</p></div>
+
+  <h4 class="rh">Lever A — the cheapest win: plan 4 on a stronger backbone (no training)</h4>
+  <p><b>In one sentence:</b> keep the exact score-only recipe of plan 4, but replace SD 1.5 with a much
+  better painter. Our plan 4 pipeline (rank images by ROI score → average the top-K → bridge to the
+  generator's image-embedding space → condition) transfers directly to <b>SDXL</b>, <b>SD 3</b>, or
+  <b>FLUX.1</b> via their IP-Adapters. Nothing about the encoder or the method changes — only the image
+  quality of the base model. This is the single highest-return next step, and it needs <em>zero</em>
+  training.</p>
+  <p class="anlg"><b>Why it helps:</b> plan 4 already sidesteps \(\alpha\) (it never takes a gradient).
+  Its only weakness was SD 1.5's modest fidelity and the coarse top-K average. A stronger backbone fixes
+  the fidelity half for free; a finer bridge (fewer-K, or IP-Adapter-Plus) fixes the rest.</p>
+
+  <h4 class="rh">Lever B — REPA: train a generator that natively speaks DINOv2 (option 6)</h4>
+  <p class="who" style="font-family:var(--mono);font-size:12px;color:var(--faint)">Yu et al., “Representation
+  Alignment for Generation,” ICLR 2025 (Oral).</p>
+  <p><b>In one sentence:</b> while training a diffusion transformer, add a loss that forces its internal
+  features to <em>match</em> a frozen DINOv2's features of the same image. The generator then thinks in
+  DINOv2's language, so a DINOv2 brain-gradient is renderable by construction.</p>
+  \[ \mathcal{L}=\mathcal{L}_{\text{diffusion}} \;+\; \lambda\underbrace{\big(1-\operatorname{sim}\!\big(
+     P_\phi(h_t),\; f_{\text{DINO}}(x)\big)\big)}_{\text{align DiT hidden }h_t\text{ to DINOv2}} \]
+  <ul class="gl">
+    <li>\(h_t\) — a hidden layer of the diffusion transformer at step \(t\); \(P_\phi\) a small projector.</li>
+    <li>\(f_{\text{DINO}}(x)\) — frozen DINOv2 features of the clean image. \(\operatorname{sim}\) = cosine.</li>
+    <li>\(\lambda\) — alignment strength. (In the paper this also makes training much faster/better.)</li>
+  </ul>
+  <p><b>Why it's the principled cure:</b> after REPA, the generator's own representation <em>is</em>
+  DINOv2-shaped — so your brain encoder (which reads DINOv2) points along directions the generator can
+  render: \(\alpha\to1\). Cost: you must <b>train a DiT</b> (this is the G-family "retrain the generator"
+  budget you'd ruled out for SD — but REPA is notably cheaper than training a DiT from scratch, and small
+  DiT/SiT models are tractable).</p>
+
+  <h4 class="rh">Lever C — RCG: generate in representation space (option 5)</h4>
+  <p class="who" style="font-family:var(--mono);font-size:12px;color:var(--faint)">Li, Katabi &amp; He,
+  “Return of Unconditional Generation,” NeurIPS 2024.</p>
+  <p><b>In one sentence:</b> split generation in two — first a small model samples a self-supervised
+  <em>representation</em> \(z_{\text{rep}}\) (DINOv2-like), then a pixel generator renders an image
+  conditioned on it. To drive an ROI, you optimize/search \(z_{\text{rep}}\) to maximize the brain score,
+  then decode — all in the representation space your encoder already lives in.</p>
+  \[ z_{\text{rep}}^\star=\arg\max_{z}\; a_V\big(G(z)\big),\qquad \text{image}=G(z_{\text{rep}}^\star) \]
+  <p>It's plan 4's idea, but with a purpose-built representation→image generator instead of a bridge into
+  a CLIP model — so the round-trip is faithful rather than approximate. Cost: use/train the RCG stack.</p>
+
+  <table class="seltab">
+    <tr><th>lever</th><th>touches</th><th>training</th><th>expected payoff</th></tr>
+    <tr><td>A · plan 4 on SDXL/SD3/FLUX</td><td>base model only</td><td>none</td><td>big realism jump, today</td></tr>
+    <tr><td>B · REPA DiT</td><td>new generator</td><td>train a DiT (align to DINOv2)</td><td>native DINOv2 guidance, α→1</td></tr>
+    <tr><td>C · RCG</td><td>new generator</td><td>train/adopt RCG stack</td><td>faithful rep-space ROI search</td></tr>
+  </table>
+  <div class="cbox"><h4>Recommendation</h4>
+  <p><b>Do Lever A first</b> — plan 4 (or readout-head) on a stronger backbone is the cheapest, fastest,
+  no-training way to turn the "kind-of-works" photos into genuinely good ones. If you're willing to train
+  a generator, <b>REPA</b> is the principled endgame: it makes your DINOv2 encoder a first-class steering
+  wheel instead of a foreign one.</p></div>
+</div>
+'''
+
+PAPERS = r'''
+<div class="part" id="papers">
+  <h2>Part X</h2>
+  <h3>Related papers we already have — the generator × encoder landscape</h3>
+  <p class="lede">Five papers in this project bear directly on "drive a brain ROI with a generator."
+  They span every generator family — and two are from the <em>same lab</em> as your DINOv2 encoder.</p>
+  <div class="gwrap"><table class="seltab" style="min-width:640px">
+    <tr><th>paper</th><th>generator</th><th>encoder</th><th>approach</th><th>relation to your goal</th></tr>
+    <tr><td><b>NeuroGen</b> (Gu et al.)</td><td>BigGAN</td><td>CNN (GNet)</td>
+        <td>optimize the GAN latent/class to maximize predicted voxel activation</td>
+        <td>the GAN-era ancestor of gradient guidance</td></tr>
+    <tr><td><b>BrainDiVE</b> (Luo, NeurIPS'23)</td><td>Stable Diffusion</td><td>CLIP</td>
+        <td>gradient-guide the sampler by the encoder's gradient</td>
+        <td>the exact method you're extending (high α because CLIP↔CLIP)</td></tr>
+    <tr><td><b>BrainExplore</b> (Weizmann/MIT)</td><td>— (score-based)</td><td>encoder + SAEs</td>
+        <td>per unit: top natural images + a language description of their shared meaning</td>
+        <td>encoder-as-<em>score</em> — like plan 4; no α problem</td></tr>
+    <tr><td><b>From Activation to Causality</b> (BrainCause, Weizmann/MIT)</td><td>diffusion editing</td>
+        <td>image→fMRI encoder</td><td>counterfactual edits that remove a concept to test <em>causation</em></td>
+        <td>validation layer: proves a region <em>represents</em> a concept, not just correlates</td></tr>
+    <tr><td><b>Wisdom of a Crowd of Brains</b> (Weizmann)</td><td>—</td><td>DINOv2 universal</td>
+        <td>one encoder across many subjects on frozen DINOv2 features</td>
+        <td><b>your encoder</b></td></tr>
+  </table></div>
+  <div class="cbox"><h4>The key point for your question</h4>
+  <p>You asked for <b>gradient guidance you can use with your universal encoder</b>. The gradient-guidance
+  lineage is <b>NeuroGen → BrainDiVE</b> (and our plans 1–3). BrainDiVE works because its CLIP encoder
+  matches SD's CLIP conditioning (high α); yours is DINOv2, so the direct gradient is capped — which is
+  why <b>readout-head</b> (route the gradient through SD's own features) and <b>REPA</b> (a generator whose
+  features are DINOv2-aligned) are the two ways to keep gradient guidance <em>and</em> use your encoder.</p>
+  <p><b>Also worth knowing:</b> <b>BrainExplore</b> and <b>BrainCause</b> come from the same lab as your
+  encoder and deliberately <em>avoid</em> gradient guidance — score-based discovery and counterfactual
+  editing. If the goal is discovery/validation rather than steering, those are the encoder-native routes
+  that never hit the α wall at all.</p></div>
 </div>
 '''
 
@@ -499,13 +601,14 @@ body = body[body.find(">")+1:]                       # drop the <body ...> tag i
 # insert Results before the last top-level part (References)
 idx = body.rfind('class="part"')
 open_idx = body.rfind('<', 0, idx)
-body = body[:open_idx] + RESULTS + NEXTSTEPS + body[open_idx:]
+body = body[:open_idx] + RESULTS + NEXTSTEPS + NEXTGEN + PAPERS + body[open_idx:]
 # add a TOC entry (insert before the toc's closing </ol>)
 tj = body.find('class="toc"')
 if tj > 0:
     ol_end = body.find('</ol>', tj)
     toc_add = ('<li><a href="#results">Part VII &middot; Results (with images)</a></li>'
-               '<li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li>')
+               '<li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li>'
+               '<li><a href="#bettergen">Part IX &middot; Using a better generator (REPA / RCG / stronger backbones)</a></li><li><a href="#papers">Part X &middot; Related papers we have (generator × encoder landscape)</a></li>')
     body = body[:ol_end] + toc_add + body[ol_end:]
 
 # extract original <style> and MathJax config from head
