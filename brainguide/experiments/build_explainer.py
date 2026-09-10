@@ -112,6 +112,38 @@ ORIG = ORIG.replace(
     'guidance (DINOv2 included) — but they <b>cannot fix the CLIP↔DINOv2 manifold mismatch itself.</b> '
     'That needs Part VI: use the encoder as a <em>score</em> (α irrelevant), <em>reroute</em> the '
     'gradient through renderable features, or <em>realign</em> the encoder.</p></div>')
+# plain-language version of the dense "fix-stack, in priority order" list + what we tried
+ORIG = ORIG.replace(
+    '<h4>The fix-stack, in priority order</h4>',
+    '<h4>The fix-stack, in priority order</h4>'
+    '<div class="cbox"><h4>Plain-language version — what each tool is, and what we tried</h4>'
+    '<p>(The technical list with sources &amp; equations is right below; a full table with results is in '
+    '<b>Part XII</b>.)</p><ul class="gl">'
+    '<li><b>Cutouts</b> — score many random <em>crops</em> of the image and average, instead of the whole '
+    'image once. Adversarial per-pixel noise disagrees across crops and cancels; real content survives. '
+    '<b>→ Tried ✔ (plan 1): calmed texture, but images went mushy.</b></li>'
+    '<li><b>Guide on the clean estimate</b> \\((\\hat x_0)\\) — feed the encoder the model\'s '
+    '<em>predicted finished image</em>, not the half-noisy one (the encoder is only meaningful on clean '
+    'images). <b>→ Tried ✔ (always): necessary, baseline behavior.</b></li>'
+    '<li><b>Spherical-distance loss</b> — when matching two embeddings, measure distance on the sphere '
+    'instead of raw cosine (which flattens near the target). <b>→ Not used ✖ — we maximize activation, '
+    'not match an embedding.</b></li>'
+    '<li><b>Adaptive (noise-normalized) step</b> — size each nudge relative to the model\'s own step, so '
+    'it never vanishes or overwhelms. The "finicky-killer." <b>→ Tried ✔: this is what made images '
+    'appear at all.</b></li>'
+    '<li><b>Guide only in the middle ("semantic window")</b> — skip early (too noisy) and late (only adds '
+    'texture) steps. <b>→ Tried ✔ (plan 2).</b></li>'
+    '<li><b>Time-travel / resampling</b> — in that window, step back and redo a few times so the prior '
+    're-absorbs off-manifold kicks. <b>→ Tried ✔ (plan 2): sharper, but still DINOv2 texture; partly '
+    'hacked on held-out.</b></li>'
+    '<li><b>Manifold projection (MPGD / MCG)</b> — project the gradient so no step leaves real-image '
+    'space (keep only the on-manifold part). No training. <b>→ Not tried ✖ — the principled next '
+    'experiment (the one you\'re considering).</b></li>'
+    '<li><b>TV + range regularizers</b> — penalize checkerboard texture and blown-out contrast. '
+    '<b>→ Tried ✔ (plan 1).</b></li>'
+    '<li><b>SAG (self-attention guidance)</b> — sharpen structure. <b>→ Off ⚠ (diffusers-0.27 '
+    'incompatibility; BrainDiVE uses 0.75).</b></li>'
+    '</ul></div>')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
