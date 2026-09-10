@@ -767,10 +767,14 @@
   (Shen et al., NeurIPS 2024) — which is why the Crowson/Disco-Diffusion practice adds cutouts + TV. That
   SD "speaks CLIP" is architectural fact (its cross-attention is conditioned on CLIP; Rombach et al. 2022),
   and REPA (Yu et al., ICLR 2025) is direct evidence that <em>aligning</em> a generator to DINOv2 fixes it.
-  <b>Honest caveat:</b> the specific number "α" is this guide's clean formalization (a standard
-  tangent/normal decomposition), not a named theorem. And our own results below <em>confirm</em> it: the
-  raw DINOv2 gradient made texture, on-manifold/score-only methods made photos, and the held-out encoder
-  exposed the gradient methods as partly reward-hacking.</p>
+  <b>Honest caveat — assumed vs. measured:</b> we did <em>not</em> numerically measure α (projecting a
+  gradient onto the manifold's tangent plane is hard), so <b>α is an explanatory model, not a measured
+  number</b> — the tangent/normal split is standard geometry, but the ratio "α" is this guide's framing.
+  What we <em>did</em> measure is the outcome it predicts. So the CLIP-vs-DINOv2 quality gap is a
+  <b>measured fact</b>; "it's because DINOv2's gradient is more off-manifold" is the <b>best-supported
+  explanation</b> (matching the adversarial-gradient literature and REPA's premise), not a proven theorem.
+  Our results bear it out: the raw DINOv2 gradient made texture, on-manifold/score-only methods made
+  photos, and the held-out encoder exposed the gradient methods as partly reward-hacking.</p>
   <p><b>FAQ — "BrainDiVE used the gradient; why can't I?"</b> You can — our <em>baseline</em> is exactly
   that. Gradient guidance isn't forbidden; its quality depends on the encoder↔generator match.
   <b>BrainDiVE's encoder is CLIP — the same language SD obeys</b> — so its gradient is on-manifold (high α)
@@ -1107,10 +1111,19 @@
   {repa_samples}
   <p><b>Why — and the real lesson.</b> Our guidance decoded the latent to pixels and took the encoder
   gradient <em>through the VAE</em> — the <em>same</em> pixel→latent path as SD. It never used REPA's
-  DINOv2-<em>aligned internal features</em>. So it reward-hacked exactly like the SD gradient baselines.
-  <b>Swapping to a better-aligned generator is not enough — the guidance itself must go through the aligned
-  features</b> (i.e. a readout-head on the REPA SiT, or native representation conditioning). That is the
-  concrete next experiment; our naive port is an honest negative result that isolates <em>why</em>.</p></div>
+  DINOv2-<em>aligned internal features</em>. So it reward-hacked exactly like the SD gradient baselines.</p>
+  <p><b>Would a different guidance strength fix it? No — and this matters.</b> We tried scale 0.3 (20
+  steps) and 0.2 (50 steps); both texture. Scale changes the <em>magnitude</em> of the push, not its
+  <em>direction</em> — it scales the on-manifold and off-manifold halves together, so α (the ratio) is
+  unchanged (exactly the Part-I argument for why "just push harder" fails on SD). The fix has to change
+  <em>where the gradient comes from</em>, not how hard you push.</p>
+  <p><b>The fix — "a readout-head on the SiT":</b> apply option 3 to REPA. Train a tiny head on the
+  <em>SiT's own internal features</em> — which REPA trained to <em>be</em> DINOv2 — to predict the ROI
+  score, then guide by that head's gradient. Because those features already <em>are</em> DINOv2, the head
+  reads your brain signal from <em>inside</em> the generator, so its gradient is on-manifold by
+  construction: the aligned generator (REPA) <em>and</em> aligned guidance (readout-head) together. That
+  is the concrete next experiment; our naive pixel-space port is an honest negative result that isolates
+  exactly <em>why</em> a better generator alone isn't enough.</p></div>
 
   <h4 class="rh">Lever C — RCG: generate in representation space (option 5)</h4>
   <p class="who" style="font-family:var(--mono);font-size:12px;color:var(--faint)">Li, Katabi &amp; He,
