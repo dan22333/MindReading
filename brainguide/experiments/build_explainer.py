@@ -171,6 +171,26 @@ RESULTS = f'''
   <h4 class="rh">The seven methods we tried — at a glance</h4>
   {SUMMARY_HTML}
 
+  <div class="cbox"><h4>Is the "α / off-manifold" story actually established? (yes) — and a key FAQ</h4>
+  <p><b>It's a known phenomenon, not a hunch.</b> Three established results underpin it: (1) the gradient
+  of any network points <em>off</em> the data manifold — the mechanism of adversarial examples (Szegedy
+  et al. 2013; Goodfellow et al. 2015); (2) only adversarially-<em>robust</em> encoders have on-manifold
+  ("perceptually-aligned") gradients (Santurkar et al. 2019; Kawar, Ganz &amp; Elad, <em>Robust Classifier
+  Guidance</em>, TMLR 2022); (3) CLIP-gradient guidance specifically is provably adversarial-prone
+  (Shen et al., NeurIPS 2024) — which is why the Crowson/Disco-Diffusion practice adds cutouts + TV. That
+  SD "speaks CLIP" is architectural fact (its cross-attention is conditioned on CLIP; Rombach et al. 2022),
+  and REPA (Yu et al., ICLR 2025) is direct evidence that <em>aligning</em> a generator to DINOv2 fixes it.
+  <b>Honest caveat:</b> the specific number "α" is this guide's clean formalization (a standard
+  tangent/normal decomposition), not a named theorem. And our own results below <em>confirm</em> it: the
+  raw DINOv2 gradient made texture, on-manifold/score-only methods made photos, and the held-out encoder
+  exposed the gradient methods as partly reward-hacking.</p>
+  <p><b>FAQ — "BrainDiVE used the gradient; why can't I?"</b> You can — our <em>baseline</em> is exactly
+  that. Gradient guidance isn't forbidden; its quality depends on the encoder↔generator match.
+  <b>BrainDiVE's encoder is CLIP — the same language SD obeys</b> — so its gradient is on-manifold (high α)
+  and looks good. <b>Yours is DINOv2</b>, a space SD never learned, so the <em>same</em> method gives
+  texture (low α). Everything here is about making the DINOv2 gradient usable: clean it (plans 1–2), route
+  it through SD's own features (readout-head), or use a DINOv2-aligned generator (REPA).</p></div>
+
   <h4 class="rh">Every method, one sample per ROI (seed 0)</h4>
   {master}
   <p class="rcap">Reading the rows through the \\(\\alpha\\) lens: <b>baseline</b> is the low-\\(\\alpha\\)
