@@ -55,9 +55,9 @@ def sel_heatmaps(path):
     if not path.exists():
         return "<p class='rcap'>(matrix not found)</p>"
     d = _json.loads(path.read_text()); rois = d["rois"]
-    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo"]
+    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo","repa"]
     lbl = {"baseline":"baseline","plan1":"plan 1","plan2ctrl":"plan 2 ctrl",
-           "plan2tt":"plan 2 t-travel","plan4":"plan 4","readout":"readout (3)","ddpo":"DDPO (1)"}
+           "plan2tt":"plan 2 t-travel","plan4":"plan 4","readout":"readout (3)","ddpo":"DDPO (1)","repa":"REPA (6)"}
     def col(z):
         z = max(-2.0, min(2.0, z))
         if z >= 0: return f"rgba(46,158,143,{z/2*0.75:.2f})"
@@ -93,8 +93,8 @@ def compare_table():
     o = _json.loads(SELJSON.read_text())["methods"]
     h = _json.loads(HELDJSON.read_text())["methods"]
     lbl = {"baseline":"baseline","plan1":"plan 1 hygiene","plan2ctrl":"plan 2 ctrl",
-           "plan2tt":"plan 2 t-travel","plan4":"plan 4 bridge","readout":"readout-head (3)","ddpo":"DDPO (1)"}
-    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo"]
+           "plan2tt":"plan 2 t-travel","plan4":"plan 4 bridge","readout":"readout-head (3)","ddpo":"DDPO (1)","repa":"REPA-naive (6)"}
+    order = ["baseline","plan1","plan2ctrl","plan2tt","plan4","readout","ddpo","repa"]
     t = ('<table class="seltab"><tr><th>method</th><th>our encoder</th><th>held-out</th>'
          '<th>drop = hacking</th></tr>')
     for m in order:
@@ -123,6 +123,8 @@ def summary_table():
          "gradient guidance that works with your encoder — 4/4, honest"),
         ("ddpo", "DDPO (opt 1)", "S", "RL: encoder as reward, PPO-update a LoRA",
          "underperformed at demo scale (sample-hungry)"),
+        ("repa", "REPA-naive (opt 6)", "R/G", "pixel-gradient guidance on a DINOv2-aligned SiT",
+         "high on our encoder but inflated (+0.38) &amp; texture-y — naive guidance hacks it"),
     ]
     t = ('<table class="seltab"><tr><th>method</th><th>family</th><th>how it beats the mismatch</th>'
          '<th>held-out sel.</th><th>verdict</th></tr>')
@@ -148,6 +150,7 @@ plan2_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test2/t2tt_{r}_seed{c[1:]
 base_samples  = grid(SEEDCOLS, ROIROWS, lambda c, r: f"baseline/base_{r}_seed{c[1:]}_0.png")
 readout_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test3/t3_{r}_seed{c[1:]}_0.png")
 ddpo_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test5/t5_{r}_seed{c[1:]}_0.png")
+repa_samples = grid(SEEDCOLS, ROIROWS, lambda c, r: f"test6/t6_{r}_seed{c[1:]}_0.png")
 def _abs_datauri(p):
     import base64 as _b
     q=Path(p)
@@ -159,6 +162,13 @@ caveat = grid(
     rows=[("faces","faces"),("bodies","bodies")],
     tpl=lambda c,r: (f"baseline/sub1_{r}_seed0_0.png" if c=="baseline"
                      else f"test4/t4_{r}_seed0_0.png"))
+
+# the controlled proof: SAME SD gradient guidance, CLIP encoder vs DINOv2 encoder
+clipdino = grid(
+    cols=[("clip","CLIP encoder (orig. BrainDiVE)"),("dino","DINOv2 encoder (our baseline)")],
+    rows=[(r, r) for r in ["faces", "places", "words", "bodies"]],
+    tpl=lambda c,r: (f"braindive_clip/{r}_seed0.png" if c=="clip"
+                     else f"baseline/base_{r}_seed0_0.png"))
 
 RESULTS = f'''
 <div class="part" id="results">
@@ -190,6 +200,13 @@ RESULTS = f'''
   and looks good. <b>Yours is DINOv2</b>, a space SD never learned, so the <em>same</em> method gives
   texture (low α). Everything here is about making the DINOv2 gradient usable: clean it (plans 1–2), route
   it through SD's own features (readout-head), or use a DINOv2-aligned generator (REPA).</p></div>
+
+  <h4 class="rh">The proof, controlled: same guidance, swap only the encoder</h4>
+  <p class="rcap">Both columns use identical SD gradient guidance on subject 1's ROIs. Left: the original
+  BrainDiVE <b>CLIP</b> encoder (reproduced here). Right: our <b>DINOv2</b> universal encoder (baseline).
+  Only the encoder differs — and CLIP is coherent while DINOv2 collapses to texture. That is the α claim,
+  demonstrated, not asserted.</p>
+  {clipdino}
 
   <h4 class="rh">Every method, one sample per ROI (seed 0)</h4>
   {master}
@@ -508,6 +525,19 @@ NEXTGEN = r'''
   render: \(\alpha\to1\). Cost: you must <b>train a DiT</b> (this is the G-family "retrain the generator"
   budget you'd ruled out for SD — but REPA is notably cheaper than training a DiT from scratch, and small
   DiT/SiT models are tractable).</p>
+
+  <div class="cbox"><h4>We actually tested REPA — and it taught us something important</h4>
+  <p>We took the public REPA <b>SiT-XL/2</b> checkpoint and guided it with your universal encoder
+  (5 seeds × 4 ROIs). Result: on our encoder it scored the <em>highest</em> selectivity of any method
+  (<b>4/4, +1.91</b>) — but held-out only <b>+1.53</b> (<b>drop +0.38 → inflated</b>), and the images are
+  <b>texture-y</b>, not clean:</p>
+  {repa_samples}
+  <p><b>Why — and the real lesson.</b> Our guidance decoded the latent to pixels and took the encoder
+  gradient <em>through the VAE</em> — the <em>same</em> pixel→latent path as SD. It never used REPA's
+  DINOv2-<em>aligned internal features</em>. So it reward-hacked exactly like the SD gradient baselines.
+  <b>Swapping to a better-aligned generator is not enough — the guidance itself must go through the aligned
+  features</b> (i.e. a readout-head on the REPA SiT, or native representation conditioning). That is the
+  concrete next experiment; our naive port is an honest negative result that isolates <em>why</em>.</p></div>
 
   <h4 class="rh">Lever C — RCG: generate in representation space (option 5)</h4>
   <p class="who" style="font-family:var(--mono);font-size:12px;color:var(--faint)">Li, Katabi &amp; He,

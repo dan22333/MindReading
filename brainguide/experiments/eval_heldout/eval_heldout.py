@@ -21,7 +21,7 @@ N = len(ROIS)
 HIGHER = {"faces", "places", "words", "bodies"}      # scored via forward_higher; early via forward_early
 METHODS = {"baseline": ("baseline", "base"), "plan1": ("test1", "t1"),
            "plan2ctrl": ("test2", "t2ctrl"), "plan2tt": ("test2", "t2tt"),
-           "plan4": ("test4", "t4"), "readout": ("test3", "t3"), "ddpo": ("test5", "t5")}
+           "plan4": ("test4", "t4"), "readout": ("test3", "t3"), "ddpo": ("test5", "t5"), "repa": ("test6", "t6")}
 CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073])[None, :, None, None]
 CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711])[None, :, None, None]
 

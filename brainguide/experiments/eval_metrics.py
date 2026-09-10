@@ -38,6 +38,7 @@ METHODS = {
     "plan4":     ("test4", "t4"),
     "readout":   ("test3", "t3"),
     "ddpo":      ("test5", "t5"),
+    "repa":      ("test6", "t6"),
 }
 
 
