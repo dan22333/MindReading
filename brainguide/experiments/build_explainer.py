@@ -144,6 +144,20 @@ ORIG = ORIG.replace(
     '<li><b>SAG (self-attention guidance)</b> — sharpen structure. <b>→ Off ⚠ (diffusers-0.27 '
     'incompatibility; BrainDiVE uses 0.75).</b></li>'
     '</ul></div>')
+# Area B: state clearly which of the six options we actually tried
+ORIG = ORIG.replace(
+    '<b>S, R, and C</b>, shown first.</div>',
+    '<b>S, R, and C</b>, shown first.</div>'
+    '<div class="cbox"><h4>Which of these six did we actually run?</h4>'
+    '<p><b>Tried:</b> <b>1 · DDPO</b> (Test 5 — demo-scale, underperformed, sample-starved) · '
+    '<b>3 · Readout-head</b> (Test 3 — best gradient-side result, 4/4 &amp; honest) · '
+    '<b>4 · Bridge + IP-Adapter</b> (Test 4 = plan 4 — best realism) · '
+    '<b>6 · REPA</b> (Test 6 — ran, but naive pixel-guidance still hacked → texture).</p>'
+    '<p><b>Not tried:</b> <b>2 · Robustify the encoder</b> (it fine-tunes the encoder read-out — ruled '
+    'out by the "don\'t touch encoder weights" constraint) · <b>5 · RCG</b> (needs training a generator; '
+    'also MoCo-v3, not DINOv2).</p>'
+    '<p>See Part VII for the images + selectivity numbers, and the "training rigor" note there for how '
+    'carefully each was trained.</p></div>')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
@@ -475,6 +489,22 @@ RESULTS = f'''
   <b>gated</b> on Hugging&nbsp;Face (401 anonymous), so plan&nbsp;4 uses the public equivalent —
   SD&nbsp;1.5&nbsp;+&nbsp;IP-Adapter — which consumes the same CLIP-ViT-H image embedding the bridge
   produces. Same idea, reachable weights.</p>
+
+  <h4 class="rh">Training rigor — honest limitations</h4>
+  <p>These runs are <b>demonstration-grade, not rigorously tuned</b>. What we did <em>not</em> do:
+  proper train/validation splits, hyperparameter sweeps (LR, KL, guidance scale), gradient-norm
+  monitoring, or use the encoder's native <b>NSD</b> image distribution for labels.</p>
+  <ul class="gl">
+    <li><b>Readout-head &amp; bridge</b> were trained on ~1000 ImageNet-sample images with <b>no
+    held-out split</b> — the head's reported train correlation (r≈0.99) is almost certainly
+    <b>overfit</b>. (But its <em>images</em> were judged by the independent held-out encoder, which
+    doesn't depend on that fit — so "readout-head is selective &amp; honest" still stands.)</li>
+    <li><b>DDPO</b> was <b>badly under-budgeted</b> (240 samples vs. the hundreds-of-rounds the method
+    needs) and unswept — so its weak 2/4 is <em>not</em> a fair test of DDPO, just of this tiny run.</li>
+    <li><b>REPA</b> used a pretrained checkpoint but only 2 guidance settings (no scale sweep).</li>
+  </ul>
+  <p>A rigorous redo would use NSD (or a large, split) label set, sweep hyperparameters, monitor
+  validation metrics + grad norms, and give DDPO a real sample budget.</p>
 </div>
 '''
 
