@@ -171,6 +171,131 @@
 <div class="callout key"><b>TL;DR.</b> Your prettiness gap is a <b>feature-space mismatch</b>, not a worse encoder: SD 2.1 was only ever trained to obey <b>CLIP</b>-shaped steering, so a CLIP encoder's gradient is <i>renderable</i> and a DINOv2 encoder's is partly <i>adversarial</i> → texture. It's a known problem (adversarial / off-manifold gradients). You can fix the gradient path (make the encoder robust, or add an adapter, or reward-fine-tune the generator), <b>or</b> sidestep it entirely by only ever using the encoder as a <i>score</i> (search / VLM / RL loop) — which is what your target paper should do.</div>
 
 <!-- ============ PART 0 ============ -->
+
+<div class="part" id="brief">
+  <h2>Meeting brief</h2>
+  <h3>The core problem (DINOv2 vs CLIP), argued with math — and every fix we tried</h3>
+  <p class="lede">Self-contained summary for a talk. Part A is the rigorous argument for <em>why</em> a
+  DINOv2 brain-gradient breaks Stable Diffusion (logic + math + what's proven vs. measured). Part B is
+  every method we tried, each as intuition · math · steps · result.</p>
+
+  <h4 class="rh">A · Why the DINOv2 gradient breaks SD — the argument</h4>
+  <p><b>Setup.</b> We want an image \(x\) that maximizes a brain ROI's predicted activation \(r(x)\)
+  (mean over the ROI's voxels of the encoder \(f\)). SD does not edit pixels — it edits a latent \(z\),
+  and a decoder gives \(x=D(z)\). The encoder scores pixels. The logical chain:</p>
+  <ol class="gl">
+    <li><b>Guidance acts on the latent, so it goes through the decoder.</b> By the chain rule the update
+    you actually apply is \[ g \;=\; \nabla_z\, r(D(z)) \;=\; J_D^{\top}\,\nabla_x r \tag{1} \]
+    the pixel-wish \(\nabla_x r\) passed through the decoder Jacobian \(J_D^{\top}\) (the "translator").</li>
+    <li><b>Any pixel-wish splits into renderable + non-renderable</b> relative to the manifold \(\mathcal M\)
+    of real images: \[ \nabla_x r \;=\; g_\parallel + g_\perp,\quad g_\parallel=P_{\mathcal M}\nabla_x r,
+    \quad g_\perp=(I-P_{\mathcal M})\nabla_x r \tag{2} \] \(g_\parallel\) slides along real-image space
+    (honest); \(g_\perp\) pokes off it (an adversarial perturbation — textbook network-fooling).</li>
+    <li><b>The decoder can only carry \(g_\parallel\).</b> At gentle strength the diffusion prior scrubs
+    \(g_\perp\); crank the strength and \(g_\perp\) dominates → the image slides off \(\mathcal M\) into
+    texture.</li>
+    <li><b>One number predicts the outcome:</b> \[ \alpha=\frac{\lVert P_{\mathcal M}\nabla_x r\rVert}
+    {\lVert\nabla_x r\rVert}\in[0,1] \tag{3} \] fraction of the wish that is renderable. \(\alpha\!\to\!1\)
+    → photos; \(\alpha\!\to\!0\) → static.</li>
+    <li><b>SD's renderable directions are CLIP-shaped</b> — architectural fact: its cross-attention is
+    conditioned <em>only</em> on CLIP embeddings. So a <b>CLIP</b> encoder's gradient lands mostly in
+    \(g_\parallel\) (high \(\alpha\)); a <b>DINOv2</b> encoder's — a space SD never learned — lands mostly
+    in \(g_\perp\) (low \(\alpha\)).</li>
+  </ol>
+  <div class="cbox"><h4>What is proven, argued, and measured (be precise in the talk)</h4>
+  <p><b>Proven (algebra):</b> scaling can't rescue it. Scale guidance by \(s\): \(g_\parallel\!\to\!
+  s\,g_\parallel\), \(g_\perp\!\to\!s\,g_\perp\), so \(\alpha=\lVert s\,g_\parallel\rVert/\lVert s\,
+  \nabla_x r\rVert=\alpha\) — unchanged. "Push harder" only amplifies both halves.</p>
+  <p><b>Established (literature):</b> encoder gradients are generically off-manifold (adversarial examples,
+  Szegedy 2013 / Goodfellow 2015); CLIP-guidance is <em>provably</em> adversarial-prone (Shen et al.,
+  NeurIPS 2024); robust encoders have on-manifold gradients (Kawar/Elad, TMLR 2022).</p>
+  <p><b>Modeled, not measured:</b> we did not numerically compute \(g_\parallel/g_\perp\) — \(\alpha\) is
+  the explanatory model.</p>
+  <p><b>Measured — our controlled proof:</b> <em>same</em> SD gradient guidance, swap only the encoder →
+  reproduced BrainDiVE (<b>CLIP</b>) gives coherent images; our baseline (<b>DINOv2</b>) gives texture
+  (figure in Part VII). The held-out encoder further shows the DINOv2-gradient methods reward-hack. So the
+  quality gap is a <b>fact</b>; \(\alpha\) is the explanation.</p></div>
+
+  <h4 class="rh">B · Everything we tried to fix it — intuition · math · steps · result</h4>
+
+  <div class="pex"><h4>Baseline — raw gradient (BrainDiVE-style)</h4>
+    <p><b>Intuition:</b> differentiate the encoder directly and step the latent up its gradient.</p>
+    <p><b>Math:</b> guide on the Tweedie clean estimate \(\hat x_0\): \(\tilde\varepsilon=\varepsilon_\theta
+    -\sqrt{1-\bar\alpha_t}\;s\,\nabla_{\hat x_0} r\).</p>
+    <p><b>Steps:</b> each denoising step, decode \(\hat x_0\) → score ROI → backprop into the latent.</p>
+    <p class="foryou"><b>Result:</b> texture / oversaturation — the low-\(\alpha\) failure. Our floor.</p></div>
+
+  <div class="pex"><h4>Plan 1 — gradient hygiene (option: realign)</h4>
+    <p><b>Intuition:</b> adversarial pixel-directions disagree across random crops, so averaging cancels
+    them; regularizers pull on-manifold.</p>
+    <p><b>Math:</b> \(g=\tfrac1N\sum_i \nabla_x \ell\!\big(f(\mathrm{crop}_i(\hat x_0))\big)+\lambda_{TV}
+    \mathrm{TV}(x)+\lambda_{rng}\lVert x-\mathrm{clamp}(x)\rVert^2\).</p>
+    <p><b>Steps:</b> N=8 random-resized crops per step + TV + range; DPM scheduler.</p>
+    <p class="foryou"><b>Result:</b> texture calmed but images went <em>mushy</em>; held-out 4/4, +1.66,
+    honest — but poor realism. Hits the \(\alpha\) ceiling.</p></div>
+
+  <div class="pex"><h4>Plan 2 — time-travel / resampling (option: realign)</h4>
+    <p><b>Intuition:</b> re-noise a step and re-denoise so the diffusion prior re-absorbs off-manifold
+    kicks each pass.</p>
+    <p><b>Math:</b> in the semantic window, \(x_t \leftarrow \sqrt{\bar\alpha_t/\bar\alpha_{t-1}}\,x_{t-1}
+    +\sqrt{1-\bar\alpha_t/\bar\alpha_{t-1}}\;\epsilon\), repeat \(r\) times.</p>
+    <p><b>Steps:</b> DDIM, reps=4 in window \([0.1,0.6]\).</p>
+    <p class="foryou"><b>Result:</b> sharper/more structured than baseline, but still DINOv2 texture;
+    held-out +1.70 yet <em>inflated</em> (+0.19 drop → partly hacking our encoder).</p></div>
+
+  <div class="pex"><h4>Plan 4 — DINO→CLIP bridge + IP-Adapter (option: condition natively)</h4>
+    <p><b>Intuition:</b> never take the gradient — translate the DINO target into CLIP and hand it to SD's
+    normal conditioning door. \(\alpha\) becomes irrelevant.</p>
+    <p><b>Math:</b> \(\bar e_{\text{ROI}}=\tfrac1K\sum_k e_k\) (top-K DINO centroid); \(e_{\text{clip}}=
+    B(\bar e)\) via a bridge trained with \(\text{cos}+\lambda\,\text{MSE}\); condition SD on
+    \(e_{\text{clip}}\) through IP-Adapter.</p>
+    <p><b>Steps:</b> score an image bank per ROI → average top-K DINO embeddings → train MLP bridge
+    DINO→CLIP → IP-Adapter generation (no gradient).</p>
+    <p class="foryou"><b>Result:</b> <b>best realism</b> (only photographic column); held-out 4/4, +1.69,
+    <b>honest</b> (score even rises on the independent encoder). Its looseness: faces↔bodies (whole people).</p></div>
+
+  <div class="pex"><h4>Readout-head (option: realign — the "adapter" that worked)</h4>
+    <p><b>Intuition:</b> flip what you differentiate — train a small head to read the ROI target off SD's
+    <em>own</em> features, then guide through the head; its gradient is renderable by construction.</p>
+    <p><b>Math:</b> train \(h_\psi(\phi_t(x_t),t)\approx a_V(x)\) offline; guide
+    \(g_t=\nabla_{z_t} h_\psi(\phi_t(z_t),t)\).</p>
+    <p><b>Steps:</b> label a bank with the frozen DINOv2 encoder → harvest SD UNet mid-block features
+    \(\phi_t\) across noise levels → train a time-conditioned MLP head (MSE) → guide by \(\nabla\)head.</p>
+    <p class="foryou"><b>Result:</b> held-out 4/4, +1.64, <b>honest</b> (−0.06); more photographic than the
+    raw-gradient baselines. <b>The best gradient-side method — gradient guidance that works with your
+    encoder.</b> (Caveat: head trained without a val split — see rigor note.)</p></div>
+
+  <div class="pex"><h4>DDPO — RL reward (option: score-only)</h4>
+    <p><b>Intuition:</b> use the encoder only as a scalar reward and RL-tune a LoRA so SD produces
+    high-reward images; the encoder is never differentiated, so \(\alpha\) can't matter.</p>
+    <p><b>Math:</b> \(R(x_0)=a_V(x_0)\); \(\nabla_\theta J=\mathbb E\big[\sum_t (R-b)\,\nabla_\theta\log
+    p_\theta(x_{t-1}\!\mid\!x_t)\big]-\beta\,\mathrm{KL}(p_\theta\Vert p_{\text{base}})\).</p>
+    <p><b>Steps:</b> sample trajectories with step log-probs → score with encoder → per-batch advantage →
+    PPO update the LoRA. Loop.</p>
+    <p class="foryou"><b>Result:</b> <b>demo-scale (240 samples) underperformed</b> (2/4) — sample-starved,
+    not a fair test. Machinery verified end-to-end.</p></div>
+
+  <div class="pex"><h4>REPA — DINOv2-aligned generator (option: retrain generator)</h4>
+    <p><b>Intuition:</b> use a generator whose internal features <em>are</em> DINOv2 (REPA trains a SiT to
+    match DINOv2), so a DINOv2 gradient is on-manifold.</p>
+    <p><b>Math (their training):</b> \(\mathcal L=\mathcal L_{\text{diff}}+\lambda\,(1-\mathrm{sim}
+    (P(h_t),f_{\text{DINO}}(x)))\). We guided a pretrained REPA-SiT with our encoder.</p>
+    <p><b>Steps:</b> load public SiT-XL/2; guide on \(\hat x_0=x-t\,v\) via the encoder gradient.</p>
+    <p class="foryou"><b>Result:</b> naive <em>pixel</em>-guidance still hacked (highest on our encoder,
+    but +0.38 inflated, texture). Lesson: a better generator isn't enough — the guidance must go through
+    its aligned <em>features</em> (a readout-head on the SiT). Not yet run.</p></div>
+
+  <div class="cbox"><h4>One-line conclusions for the talk</h4>
+  <p><b>The problem:</b> your DINOv2 brain-gradient is off-manifold for SD (which speaks CLIP) → texture;
+  proven in a controlled A/B (CLIP clean vs DINOv2 texture, same pipeline).</p>
+  <p><b>The fixes:</b> gradient-cleaning (plans 1–2) helps but hits the \(\alpha\) ceiling; the winners
+  are <b>readout-head</b> (gradient through SD's own features — honest, selective, 4/4) and <b>plan 4</b>
+  (score→CLIP→condition — best realism, 4/4, honest). DDPO/REPA need more work.</p>
+  <p><b>Next:</b> for your project goal, the generation half is solved enough — the remaining piece is the
+  <b>discovery loop</b> (generate → VLM-remove candidate concepts → check activation drop) to find what
+  actually drives each ROI.</p></div>
+</div>
+
 <div class="part" id="bg">
   <h2>Part 0</h2>
   <h3>Background in plain words — what every piece is, and why we're doing this</h3>
