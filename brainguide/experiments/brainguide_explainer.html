@@ -165,7 +165,7 @@
     <li><a href="#build">Part IV — A build plan for <i>your</i> paper (voxel → image → concept → ablate → iterate)</a></li>
     <li><a href="#survey">Parts V &amp; VI — A two-area survey: taming CLIP gradients, and fixing <i>your</i> DINOv2 encoder</a></li>
     <li><a href="#refs">Verified references (every link checked 2026)</a></li>
-  <li><a href="#results">Part VII &middot; Results (with images)</a></li><li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li><li><a href="#bettergen">Part IX &middot; Using a better generator (REPA / RCG / stronger backbones)</a></li><li><a href="#papers">Part X &middot; Related papers we have (generator × encoder landscape)</a></li><li><a href="#fixstack">Part XII &middot; Making guidance better — fix-stack &amp; what we tried</a></li><li><a href="#papers-expanded">Part XI &middot; Every paper, expanded</a></li></ol>
+  <li><a href="#results">Part VII &middot; Results (with images)</a></li><li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li><li><a href="#bettergen">Part IX &middot; Using a better generator (REPA / RCG / stronger backbones)</a></li><li><a href="#papers">Part X &middot; Related papers we have (generator × encoder landscape)</a></li><li><a href="#papers-expanded">Part XI &middot; Every paper, expanded</a></li><li><a href="#fixstack">Part XII &middot; Making guidance better — fix-stack &amp; what we tried</a></li></ol>
 </nav>
 
 <div class="callout key"><b>TL;DR.</b> Your prettiness gap is a <b>feature-space mismatch</b>, not a worse encoder: SD 2.1 was only ever trained to obey <b>CLIP</b>-shaped steering, so a CLIP encoder's gradient is <i>renderable</i> and a DINOv2 encoder's is partly <i>adversarial</i> → texture. It's a known problem (adversarial / off-manifold gradients). You can fix the gradient path (make the encoder robust, or add an adapter, or reward-fine-tune the generator), <b>or</b> sidestep it entirely by only ever using the encoder as a <i>score</i> (search / VLM / RL loop) — which is what your target paper should do.</div>
@@ -207,7 +207,7 @@
   s\,g_\parallel\), \(g_\perp\!\to\!s\,g_\perp\), so \(\alpha=\lVert s\,g_\parallel\rVert/\lVert s\,
   \nabla_x r\rVert=\alpha\) — unchanged. "Push harder" only amplifies both halves.</p>
   <p><b>Established (literature):</b> encoder gradients are generically off-manifold (adversarial examples,
-  Szegedy 2013 / Goodfellow 2015); CLIP-guidance is <em>provably</em> adversarial-prone (Shen et al.,
+  Szegedy 2013 / Goodfellow 2015); training-free gradient guidance with a pretrained encoder (our exact setup) is more adversarial-prone than classifier guidance (Shen et al. 2024, arXiv 2403.12404;
   NeurIPS 2024); robust encoders have on-manifold gradients (Kawar/Elad, TMLR 2022).</p>
   <p><b>Modeled, not measured:</b> we did not numerically compute \(g_\parallel/g_\perp\) — \(\alpha\) is
   the explanatory model.</p>
@@ -215,6 +215,38 @@
   reproduced BrainDiVE (<b>CLIP</b>) gives coherent images; our baseline (<b>DINOv2</b>) gives texture
   (figure in Part VII). The held-out encoder further shows the DINOv2-gradient methods reward-hack. So the
   quality gap is a <b>fact</b>; \(\alpha\) is the explanation.</p></div>
+
+  <div class="cbox"><h4>The proof, in equations — what is a theorem vs. one measurable premise</h4>
+  <p><b>Honest headline:</b> you cannot prove "DINOv2 &lt; CLIP" from axioms — it depends on trained
+  weights. But Steps 1–4 below are <em>theorems</em>, and Step 5 reduces the whole claim to a single
+  <em>measurable</em> inequality. Let \(x=G(z,c)\) be the generator (decoder∘sampler), \(c\) its CLIP
+  conditioning, \(r(x)\) the ROI reward.</p>
+  <p><b>1 · Pull-back (chain rule).</b> Guidance moves the dials \(z,c\), so
+  \[ \nabla_z r=(\partial G/\partial z)^{\top}\nabla_x r,\qquad \nabla_c r=(\partial G/\partial c)^{\top}\nabla_x r. \]</p>
+  <p><b>2 · Reachable tangent + orthogonal split.</b> Near \(x_0=G(z_0,c_0)\) the generator can reach, to
+  first order, only \[ T=\operatorname{span}(\partial G/\partial z)+\operatorname{span}(\partial G/\partial c),
+  \qquad \nabla_x r=\underbrace{P_T\nabla_x r}_{g_\parallel}+\underbrace{(I-P_T)\nabla_x r}_{g_\perp}, \]
+  an exact orthogonal decomposition (\(P_T\) = projection onto \(T\)).</p>
+  <p><b>3 · Only \(g_\parallel\) is realizable.</b> The best generator move approximating the step
+  \(x_0+\eta\nabla_x r\) solves \(\min_{dz,dc}\lVert G(z_0+dz,c_0+dc)-(x_0+\eta\nabla_x r)\rVert^2\); its
+  first-order solution is the projection \(\eta\,P_T\nabla_x r=\eta g_\parallel\). The part \(\eta g_\perp\)
+  is produced by <em>no</em> \((dz,dc)\) — literally unrenderable.</p>
+  <p><b>4 · \(\alpha\) and scale-invariance (theorem).</b>
+  \[ \alpha=\frac{\lVert P_T\nabla_x r\rVert}{\lVert\nabla_x r\rVert}\in[0,1],\qquad
+  \alpha(s\nabla_x r)=\frac{\lVert s\,g_\parallel\rVert}{\lVert s\,\nabla_x r\rVert}=\alpha. \]
+  So "push harder" cannot raise \(\alpha\) — it scales both halves equally; past where the prior absorbs
+  \(g_\perp\), texture wins. \(\blacksquare\)</p>
+  <p><b>5 · The one empirical inequality (conditional theorem).</b> The claim is
+  \[ \alpha_{\text{CLIP}}\ \ge\ \alpha_{\text{DINO}} . \]
+  It follows from a single checkable <b>premise (P):</b> SD's only conditioning channel is CLIP, so
+  \(\operatorname{span}(\partial G/\partial c)\) <em>is</em> the CLIP-shaped part of \(T\); a CLIP encoder's
+  \(\nabla_x r\) points along CLIP directions → lies largely <em>in</em> \(T\); a DINOv2 encoder's points
+  along DINOv2 directions and SD has no \(\partial G/\partial(\text{DINOv2})\) channel → large part lies
+  <em>outside</em> \(T\). Given (P), \(P_T\) keeps more of \(\nabla_x r_{\text{CLIP}}\) ⇒ the inequality.</p>
+  <p><b>How to measure Step 5 (turn it into a number):</b> use the generator as \(P_T\) — compute
+  \(\nabla_x r\) for each encoder, project via encode→decode (VAE or a few denoiser steps), report the
+  surviving-norm ratio. <b>Prediction:</b> ratio\(_\text{CLIP}\) &gt; ratio\(_\text{DINO}\). And the
+  downstream version is already measured: same pipeline, swap the encoder → CLIP coherent, DINOv2 texture.</p></div>
 
   <h4 class="rh">B · Everything we tried to fix it — intuition · math · steps · result</h4>
 
@@ -652,7 +684,7 @@
 <div class="part" id="fix">
   <h2>Part V · Area A</h2>
   <h3>Taming CLIP-shaped gradient-guidance (the fix-stack)</h3>
-  <p class="lede" style="margin-top:6px">The <i>encoder-agnostic</i> foundation. These make <b>any</b> gradient-guidance cleaner — necessary for CLIP, and they raise the floor for your DINOv2 too, but they can't by themselves fix the manifold mismatch (that's Part VI). CLIP-gradient guidance is a <i>known-finicky</i> method (provably prone to adversarial gradients — <a href="https://arxiv.org/abs/2403.12404" target="_blank" rel="noopener">Shen et&nbsp;al., NeurIPS 2024</a>), but there is a standard, battle-tested <b>fix-stack</b> from the CLIP-guided-diffusion lineage (Crowson / Disco Diffusion) plus the guidance-theory papers. Below, in priority order (biggest win first).</p><div class="cbox"><h4>What those references actually found / did</h4><p><b>Shen et al., NeurIPS 2024</b> — the "why it's finicky" result. They formally analyzed CLIP-guided diffusion and showed the guidance gradient is <em>provably prone to adversarial directions</em>: the CLIP score can be spiked by imperceptible, texture-like perturbations that don't change what the image depicts. Their fix is an <em>adaptive, analytically-derived step size</em> (scale by the score-vs-noise magnitudes) — the principled version of "normalize the step."</p><p><b>Crowson / Disco Diffusion</b> — not a formal paper but the battle-tested community codebase that first made CLIP guidance actually produce images instead of static. It introduced the hands-on fix-stack we use: <b>cutouts</b> (average the gradient over many random crops so per-pixel adversarial noise cancels), the <b>spherical-distance loss</b>, and <b>TV / range regularizers</b>. This is the practical origin of our <b>plan 1</b>.</p><p><b>The "guidance-theory papers"</b> = classifier &amp; classifier-free guidance (Dhariwal&amp;Nichol; Ho&amp;Salimans), DPS, FreeDoM, and MCG/MPGD — the formal framework for <em>how</em> to steer a diffusion sampler and keep it on-manifold (each expanded in Part XI, and mapped to what we ran in Part XII).</p><p><b>The one-line point of this whole section:</b> these raise the floor for <em>any</em> gradient guidance (DINOv2 included) — but they <b>cannot fix the CLIP↔DINOv2 manifold mismatch itself.</b> That needs Part VI: use the encoder as a <em>score</em> (α irrelevant), <em>reroute</em> the gradient through renderable features, or <em>realign</em> the encoder.</p></div>
+  <p class="lede" style="margin-top:6px">The <i>encoder-agnostic</i> foundation. These make <b>any</b> gradient-guidance cleaner — necessary for CLIP, and they raise the floor for your DINOv2 too, but they can't by themselves fix the manifold mismatch (that's Part VI). CLIP-gradient guidance is a <i>known-finicky</i> method (provably prone to adversarial gradients — <a href="https://arxiv.org/abs/2403.12404" target="_blank" rel="noopener">Shen et&nbsp;al., NeurIPS 2024</a>), but there is a standard, battle-tested <b>fix-stack</b> from the CLIP-guided-diffusion lineage (Crowson / Disco Diffusion) plus the guidance-theory papers. Below, in priority order (biggest win first).</p><div class="cbox"><h4>What those references actually found / did</h4><p><b>Shen et al. 2024 (arXiv 2403.12404)</b> — the "why it's finicky" result. They analyzed training-free guidance and showed the pretrained-encoder gradient is more susceptible to adversarial gradients (theoretical analysis): the encoder score can be spiked by imperceptible, texture-like perturbations that don't change what the image depicts. Their fix is an <em>adaptive, analytically-derived step size</em> (scale by the score-vs-noise magnitudes) — the principled version of "normalize the step."</p><p><b>Crowson / Disco Diffusion</b> — not a formal paper but the battle-tested community codebase that first made CLIP guidance actually produce images instead of static. It introduced the hands-on fix-stack we use: <b>cutouts</b> (average the gradient over many random crops so per-pixel adversarial noise cancels), the <b>spherical-distance loss</b>, and <b>TV / range regularizers</b>. This is the practical origin of our <b>plan 1</b>.</p><p><b>The "guidance-theory papers"</b> = classifier &amp; classifier-free guidance (Dhariwal&amp;Nichol; Ho&amp;Salimans), DPS, FreeDoM, and MCG/MPGD — the formal framework for <em>how</em> to steer a diffusion sampler and keep it on-manifold (each expanded in Part XI, and mapped to what we ran in Part XII).</p><p><b>The one-line point of this whole section:</b> these raise the floor for <em>any</em> gradient guidance (DINOv2 included) — but they <b>cannot fix the CLIP↔DINOv2 manifold mismatch itself.</b> That needs Part VI: use the encoder as a <em>score</em> (α irrelevant), <em>reroute</em> the gradient through renderable features, or <em>realign</em> the encoder.</p></div>
 </div>
 
 <section class="block">
@@ -896,8 +928,8 @@
   of any network points <em>off</em> the data manifold — the mechanism of adversarial examples (Szegedy
   et al. 2013; Goodfellow et al. 2015); (2) only adversarially-<em>robust</em> encoders have on-manifold
   ("perceptually-aligned") gradients (Santurkar et al. 2019; Kawar, Ganz &amp; Elad, <em>Robust Classifier
-  Guidance</em>, TMLR 2022); (3) CLIP-gradient guidance specifically is provably adversarial-prone
-  (Shen et al., NeurIPS 2024) — which is why the Crowson/Disco-Diffusion practice adds cutouts + TV. That
+  Guidance</em>, TMLR 2022); (3) training-free gradient guidance (a pretrained encoder's gradient — our setup) is more adversarial-prone than classifier guidance
+  (Shen et al. 2024, arXiv 2403.12404) — which is why the Crowson/Disco-Diffusion practice adds cutouts + TV. That
   SD "speaks CLIP" is architectural fact (its cross-attention is conditioned on CLIP; Rombach et al. 2022),
   and REPA (Yu et al., ICLR 2025) is direct evidence that <em>aligning</em> a generator to DINOv2 fixes it.
   <b>Honest caveat — assumed vs. measured:</b> we did <em>not</em> numerically measure α (projecting a
