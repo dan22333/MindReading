@@ -36,6 +36,58 @@ ORIG = ORIG.replace(
     'language SD speaks (CLIP)</b>. (It is a tendency, not a law — a DINOv2 wish has a reachable part too; '
     'the trouble is the unreachable part is large.) Hold that thought — Step 2 makes "reachable vs. not" '
     'exact.</p>')
+# insert a full "notation key" box right after the Part-0 "two words" intro
+ORIG = ORIG.replace(
+    '\n  <h4>The one-paragraph version of what goes wrong',
+    '\n  <div class="cbox"><h4>Notation key — every symbol, in one place</h4>'
+    '<p><b>The objects.</b> \\(x\\) = the image (pixels); \\(z\\) = the latent (the compressed code SD '
+    'edits); \\(D\\) = the decoder, \\(x=D(z)\\); \\(r\\) = the reward (one number: how hard the ROI '
+    'fires = average of the encoder\'s per-voxel predictions); \\(\\mathcal M\\) = the manifold (the set '
+    'of real-looking images).</p>'
+    '<p><b>Gradients (calculus).</b> \\(\\nabla\\) = gradient, "direction of steepest increase"; '
+    '\\(\\nabla_x r\\) = gradient w.r.t. <em>pixels</em> = the "pixel-wish" (one value per pixel); '
+    '\\(\\nabla_z\\) = gradient w.r.t. the <em>latent</em>.</p>'
+    '<p><b>The translator (linear algebra).</b> \\(J_D\\) = the decoder\'s Jacobian, the table "nudge '
+    'this latent → these pixels move" (\\(\\partial D/\\partial z\\)); \\(J_D^{\\top}\\) = its transpose '
+    '— go backward, pixel-direction → latent-direction (what backprop applies).</p>'
+    '<p><b>The split (differential geometry).</b> \\(P_{\\mathcal M}\\) = projection onto the manifold\'s '
+    'tangent plane ("keep only the part that slides <em>along</em> real-image space"); \\(I\\) = identity, '
+    'so \\(I-P_{\\mathcal M}\\) = "the part that pokes <em>off</em> it"; \\(g_\\parallel=P_{\\mathcal M}'
+    '\\nabla_x r\\) = honest/on-manifold half; \\(g_\\perp=(I-P_{\\mathcal M})\\nabla_x r\\) = '
+    'off-manifold/"cheat" half; \\(\\lVert\\cdot\\rVert\\) = the length of a vector; '
+    '\\(\\alpha=\\lVert g_\\parallel\\rVert/\\lVert\\nabla_x r\\rVert\\) = fraction of the wish that is '
+    'honest (0→1) — this guide\'s own defined ratio.</p>'
+    '<p><b>⚠ One clash:</b> Part II\'s diffusion math writes \\(\\bar\\alpha_t\\) for the '
+    '<em>noise-schedule</em> weight at step \\(t\\) — a <b>different</b> thing from the alignment '
+    '\\(\\alpha\\) above; same Greek letter, unrelated meaning.</p></div>\n'
+    '\n  <h4>The one-paragraph version of what goes wrong')
+# clarify "normalize the step" (Part II item 5)
+ORIG = ORIG.replace(
+    '<h4>5 · The one knob that matters: normalize the step</h4>',
+    '<h4>5 · The one knob that matters: normalize the step</h4>'
+    '<div class="cbox"><h4>In plain words</h4>'
+    '<p>The raw guidance gradient\'s <em>size</em> is unpredictable — it swings across denoising steps '
+    'and ROIs; too small does nothing, too large explodes into texture/blank. So no single fixed '
+    '"guidance scale" works everywhere. <b>Fix:</b> don\'t fix the step size — tie it to the model\'s own '
+    'update size. Take only the gradient\'s <em>direction</em> and give it a magnitude equal to a fixed '
+    'fraction of the denoiser\'s own noise-prediction \\(\\lVert\\varepsilon\\rVert\\): '
+    '\\(\\text{guidance}= \\text{scale}\\cdot\\lVert\\varepsilon\\rVert\\cdot \\nabla r/\\lVert\\nabla r'
+    '\\rVert\\). Now one dimensionless number works for <em>every</em> ROI and timestep. '
+    '<b>Analogy:</b> cruise control — always nudge by X% of whatever the model is doing right now (early '
+    'steps make big moves, late steps tiny ones). This ROI-independent normalized step is literally what '
+    'made your images appear at all.</p></div>')
+# proof-honesty note at Step 3 (the alpha claim)
+ORIG = ORIG.replace(
+    'Why CLIP is aligned (high',
+    '<div class="cbox"><h4>Is Step 3 proved, or a model? (honest)</h4>'
+    '<p>Read \\(\\alpha\\) as a <b>model</b>, not a measured constant: we do not numerically compute '
+    '\\(g_\\parallel/g_\\perp\\) (projecting onto the manifold is hard). What is <em>proved</em> is the '
+    'scale-invariance below (turning the knob up scales both halves equally, so \\(\\alpha\\) cannot '
+    'change — pure algebra). What is an <em>architectural argument</em> is CLIP-high / DINOv2-low '
+    '(next). What is <em>measured</em> is the consequence: our controlled A/B (same guidance, CLIP '
+    'coherent vs DINOv2 texture — see Part VII) and the held-out reward-hacking. So the quality gap is a '
+    'fact; "\\(\\alpha\\) explains it" is the best-supported explanation.</p></div>'
+    'Why CLIP is aligned (high')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
