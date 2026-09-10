@@ -235,27 +235,81 @@ MEETING_BRIEF = r'''
   surviving-norm ratio. <b>Prediction:</b> ratio\(_\text{CLIP}\) &gt; ratio\(_\text{DINO}\). And the
   downstream version is already measured: same pipeline, swap the encoder → CLIP coherent, DINOv2 texture.</p></div>
 
-  <div class="cbox"><h4>Grounded in prior results — the theory chain (no A/B needed)</h4>
-  <p><b>(i) Off-the-shelf gradients are off-manifold.</b> Networks are locally near-linear (Goodfellow
-  et al. 2015), so \(\nabla_x f\) is dominated by the highest-output-per-\(\lVert\cdot\rVert\) direction —
-  a high-frequency, off-manifold pattern; ascending it is the adversarial-example construction (Szegedy
-  et al. 2014).</p>
-  <p><b>(ii) Only robust encoders have on-manifold gradients.</b> Perceptually-aligned gradients require
-  adversarial robustness (Tsipras 2019; Santurkar 2019). Off-the-shelf CLIP and DINOv2 are non-robust →
-  both carry off-manifold gradient.</p>
-  <p><b>(iii) Diffusion guidance theory pinpoints the culprit.</b> MCG (Chung 2022) / MPGD (He 2024)
-  formalize that the guidance gradient's component <em>normal</em> to \(\mathcal M\) drives samples off the
-  manifold, and prove that projecting onto the tangent fixes it.</p>
-  <p><b>(iv) Our exact setting has a direct result.</b> Shen et al. 2024 (arXiv 2403.12404): training-free
-  loss-based guidance (a pretrained encoder's gradient on clean images — BrainDiVE/us) is more
-  adversarial-prone and slower than classifier guidance.</p>
-  <p><b>(v) CLIP-good / DINOv2-bad (architectural deduction).</b> SD conditions only on CLIP (Rombach
-  2022) → its renderable tangent includes \(\operatorname{span}(\partial G/\partial c)\) = CLIP-parametrized
-  directions. CLIP is contrastively image↔text aligned (Radford 2021) → CLIP-image gradients lie largely
-  in that span (high α). DINOv2 is self-distillation, no CLIP alignment (Oquab 2023), and SD has no
-  \(\partial G/\partial(\text{DINOv2})\) channel → large off-\(T\) part (low α).</p>
-  <p><b>Scope:</b> (i)–(iv) are established results; (v) is a deduction from SD's architecture + CLIP's
-  objective — together they <em>derive</em> "DINOv2 gradient is off-manifold for SD → texture" from theory.</p></div>
+  <h4 class="rh">The theory chain — background · math · example, for each step</h4>
+  <p>Five results (four established, one deduction) that together explain the failure without any A/B.</p>
+
+  <div class="pex"><h4>(i) An off-the-shelf network's input-gradient is generically off-manifold</h4>
+  <p><b>Background.</b> Natural images occupy a thin, curved <em>manifold</em> \(\mathcal M\) inside the
+  ~786k-dim pixel space; almost every other point is static. \(\nabla_x f\) is the direction in that huge
+  space that most increases the network output.</p>
+  <p><b>Theory / math.</b> Networks are locally near-linear (Goodfellow et al. 2015):
+  \(f(x+\delta)\approx f(x)+\nabla_x f\cdot\delta\). Maximizing the change for a fixed budget
+  \(\lVert\delta\rVert_2=\epsilon\) gives, by Cauchy–Schwarz, \(\delta^\star=\epsilon\,\nabla_x f/\lVert
+  \nabla_x f\rVert\). In a megapixel image this optimal \(\delta^\star\) spreads a tiny nudge over
+  <em>very many</em> pixels — a high-frequency pattern, which lies <em>off</em> \(\mathcal M\).</p>
+  <p><b>Example.</b> The classic adversarial example: add an imperceptible pattern to a panda photo and a
+  classifier says "gibbon" with 99% confidence — that pattern <em>is</em> the \(\nabla_x f\) direction, and
+  it looks like static, not a real image (Szegedy et al. 2014).</p>
+  <p><b>For us.</b> Our ROI-score gradient \(\nabla_x r\) is exactly such a gradient → a large part points
+  into off-manifold static.</p></div>
+
+  <div class="pex"><h4>(ii) Only adversarially-robust encoders have on-manifold ("perceptually-aligned") gradients</h4>
+  <p><b>Background.</b> A robust model is trained to resist perturbations:
+  \(\min_\theta \mathbb E\,[\max_{\lVert\delta\rVert\le\epsilon} L(f_\theta(x+\delta),y)]\).</p>
+  <p><b>Theory.</b> That inner-max forces \(f\) to be <em>flat</em> inside every \(\epsilon\)-ball, i.e. it
+  forbids relying on high-frequency cues. A consequence (Tsipras 2019; Santurkar 2019): the input-gradient
+  becomes <em>low-frequency and semantically meaningful</em> — "perceptually-aligned." Robustness ⟺ small
+  gradient in off-manifold directions ⟺ \(\nabla_x f\) aligned with \(\mathcal M\).</p>
+  <p><b>Example.</b> Gradient-ascend a <em>robust</em> classifier toward "dog" and you grow ears/fur/snout
+  — a coherent edit; do it on a <em>standard</em> classifier and you get imperceptible static. Only the
+  robust one can synthesize recognizable images by plain ascent.</p>
+  <p><b>For us.</b> Off-the-shelf CLIP <em>and</em> DINOv2 are non-robust → both carry off-manifold
+  gradient. This already predicts hygiene (Part V) can only partly help — and that robustifying the encoder
+  (option 2) is the "gradient-side" cure.</p></div>
+
+  <div class="pex"><h4>(iii) Diffusion guidance theory: the off-manifold component is exactly what breaks generation</h4>
+  <p><b>Background.</b> A diffusion model learns the <em>score</em> \(\nabla_x\log p(x)\), which points
+  toward high-density (on-manifold) regions; its samples live on \(\mathcal M\).</p>
+  <p><b>Theory / math.</b> Guided sampling uses \(\nabla_x\log p(x)+\nabla_x\log p(y\mid x)\); the second
+  term is our \(\nabla_x r\). Split it into tangent + normal to \(\mathcal M\): \(g_\parallel+g_\perp\).
+  The prior's own score is a restoring force toward \(\mathcal M\); if the guidance's normal part
+  \(g_\perp\) exceeds it, the sample <em>leaves</em> \(\mathcal M\). MCG (Chung 2022) / MPGD (He 2024)
+  <em>prove</em> that projecting the guidance onto the tangent (\(P_{\mathcal M}g\), computed via the
+  Jacobian of the \(\hat x_0\)-estimate) keeps the trajectory on \(\mathcal M\).</p>
+  <p><b>Example.</b> Turn any guidance scale too high and images "burn" into oversaturated texture — that
+  is \(g_\perp\) overwhelming the prior's restoring score.</p>
+  <p><b>For us.</b> A low-α encoder (large \(g_\perp\)) provably degrades the sample; MPGD is the untried,
+  principled gradient-side fix.</p></div>
+
+  <div class="pex"><h4>(iv) For our exact regime there is a direct result — Shen et al. 2024</h4>
+  <p><b>Background.</b> Two regimes: <em>classifier guidance</em> (a classifier trained on <em>noisy</em>
+  images, so its gradient is valid along the diffusion trajectory) vs <em>training-free loss-based
+  guidance</em> (a pretrained network on <em>clean</em> images, scored on \(\hat x_0\)). BrainDiVE and we
+  are the latter.</p>
+  <p><b>What it shows (arXiv 2403.12404).</b> An optimization-theoretic analysis that training-free
+  loss-based guidance is <em>more susceptible to adversarial gradients</em> and converges slower than
+  classifier guidance — precisely because the pretrained net was never trained to give good gradients on
+  the sampling path. It proposes adaptive-step fixes (the principled "normalize the step").</p>
+  <p><b>For us.</b> This is our exact setting, so the result applies directly: our family is inherently
+  finicky — not a bug in our code.</p></div>
+
+  <div class="pex"><h4>(v) Why CLIP is high-α and DINOv2 low-α for SD — the architectural deduction</h4>
+  <p><b>Background.</b> SD's generator \(x=G(z,c)\) has two dials: the latent \(z\) and the conditioning
+  \(c\), which is a <em>CLIP</em> embedding. Reachable image directions near \(x_0\):
+  \(T=\operatorname{span}(\partial G/\partial z)\oplus\operatorname{span}(\partial G/\partial c)\).</p>
+  <p><b>Math.</b> \(\operatorname{span}(\partial G/\partial c)\) = the image changes you get by moving the
+  CLIP conditioning = the <em>CLIP-parametrized</em> semantic directions. CLIP is trained contrastively so
+  image- and text-embeddings share one space (Radford 2021); SD conditions on CLIP-text (Rombach 2022).
+  Therefore a CLIP <em>image</em>-encoder's \(\nabla_x r\) points along CLIP-embedding directions ⇒ it lies
+  largely in \(\operatorname{span}(\partial G/\partial c)\subset T\) ⇒ \(\alpha\) high. DINOv2 is
+  self-distillation with no text alignment (Oquab 2023); its directions are a different basis, and SD has
+  <em>no</em> \(\partial G/\partial(\text{DINOv2})\) dial ⇒ a large part of \(\nabla_x r_{\text{DINO}}\)
+  lies <em>outside</em> \(T\) ⇒ \(\alpha\) low.</p>
+  <p><b>Example.</b> "Make it more face-like" (CLIP) is a change SD's \(c\)-dial produces on command;
+  "raise these DINOv2 patch-statistics" has no \(c\) that produces it, so SD approximates it with texture.</p>
+  <p><b>Honest scope.</b> (i)–(iv) are established results; (v) is a <em>deduction</em> from SD=CLIP +
+  CLIP's image–text alignment + DINOv2's lack of it — not a published theorem, but it follows necessarily.
+  Together they derive "DINOv2 gradient is largely off-manifold for SD → texture" from theory.</p></div>
 
   <div class="cbox"><h4>The deeper "why DINOv2" — sensitivity mismatch</h4>
   <p>It is not that DINOv2 is a worse encoder — it is a mismatch between <b>what DINOv2 is sensitive to</b>
