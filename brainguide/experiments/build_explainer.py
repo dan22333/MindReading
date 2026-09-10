@@ -8,6 +8,34 @@ ROOT = Path("/Users/danielnurieli/AI work/MindReading")
 SCR = Path("/private/tmp/claude-501/-Users-danielnurieli-AI-work-MindReading/158d213d-99e6-4714-affb-65a69598a469/scratchpad")
 PULLED = ROOT / "brainguide/experiments/pulled"
 ORIG = (ROOT / "session_answers_2026-08-25.html").read_text()
+# clarify the dense "Jacobian rotates & stretches" sentence with a concrete analogy
+ORIG = ORIG.replace(
+    'Because latent-space and pixel-space have different sizes and shapes, this chart also '
+    '<b>rotates and stretches</b> any direction you send through it — a clean latent direction '
+    'can come out as a lopsided pixel direction, and vice-versa.</p>',
+    'Because latent space (~16k numbers) and pixel space (~786k) differ in size and wiring, this '
+    'chart <b>rotates and stretches</b> every direction. Picture the decoder as a <b>mixing board</b>: '
+    'the latent is ~16k knobs, the image ~786k light-bulbs, and <b>no knob controls a single bulb</b> — '
+    'turning one knob shifts a whole coordinated <i>pattern</i> of bulbs. So a simple, clean latent move '
+    'comes out as a complicated, spread-out pixel pattern (the “rotate”), and some knobs are <i>loud</i> '
+    '(a tiny turn floods the stage) while others are <i>quiet</i> (cranking them barely does anything) — '
+    'that is the “stretch.” A clean latent direction can therefore land as a lopsided pixel direction, '
+    'and vice-versa.</p>')
+# clarify WHY CLIP wishes are reachable but DINOv2's often are not
+ORIG = ORIG.replace(
+    'A CLIP encoder tends to wish for reachable things; a DINOv2 encoder often wishes for '
+    'unreachable ones. Hold that thought — Step 2 makes "reachable vs. not" exact.</p>',
+    'A CLIP encoder tends to wish for <b>reachable</b> things; a DINOv2 encoder often for '
+    '<b>unreachable</b> ones — here is <i>why</i>. An encoder\'s "wish" is whatever change most raises '
+    'its score, which depends on what it <i>notices</i>. CLIP was trained matching images to captions, '
+    'so it notices <b>semantic content</b> ("make this look more like a face") — a real-image change SD '
+    'can render (SD was literally built around CLIP). DINOv2 was trained by self-supervised '
+    '<b>patch-matching</b>, so it is sensitive to fine texture / patch statistics; its <i>cheapest</i> '
+    'way to spike a score is often a precise high-frequency texture tweak — which is not a coherent real '
+    'image, so the decoder cannot make it. In short: <b>reachable = "stays among real photos" = the '
+    'language SD speaks (CLIP)</b>. (It is a tendency, not a law — a DINOv2 wish has a reachable part too; '
+    'the trouble is the unreachable part is large.) Hold that thought — Step 2 makes "reachable vs. not" '
+    'exact.</p>')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
