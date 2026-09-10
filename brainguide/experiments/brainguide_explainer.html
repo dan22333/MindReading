@@ -165,7 +165,7 @@
     <li><a href="#build">Part IV — A build plan for <i>your</i> paper (voxel → image → concept → ablate → iterate)</a></li>
     <li><a href="#survey">Parts V &amp; VI — A two-area survey: taming CLIP gradients, and fixing <i>your</i> DINOv2 encoder</a></li>
     <li><a href="#refs">Verified references (every link checked 2026)</a></li>
-  <li><a href="#results">Part VII &middot; Results (with images)</a></li><li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li><li><a href="#bettergen">Part IX &middot; Using a better generator (REPA / RCG / stronger backbones)</a></li><li><a href="#papers">Part X &middot; Related papers we have (generator × encoder landscape)</a></li><li><a href="#papers-expanded">Part XI &middot; Every paper, expanded</a></li><li><a href="#fixstack">Part XII &middot; Making guidance better — fix-stack &amp; what we tried</a></li></ol>
+  <li><a href="#results">Part VII &middot; Results (with images)</a></li><li><a href="#next">Part VIII &middot; Next steps &mdash; math &amp; intuition</a></li><li><a href="#bettergen">Part IX &middot; Using a better generator (REPA / RCG / stronger backbones)</a></li><li><a href="#papers">Part X &middot; Related papers we have (generator × encoder landscape)</a></li><li><a href="#papers-expanded">Part XI &middot; Every paper, expanded</a></li><li><a href="#fixstack">Part XII &middot; Making guidance better — fix-stack &amp; what we tried</a></li><li><a href="#algos">Part XIII &middot; Algorithms — step by step with justification</a></li></ol>
 </nav>
 
 <div class="callout key"><b>TL;DR.</b> Your prettiness gap is a <b>feature-space mismatch</b>, not a worse encoder: SD 2.1 was only ever trained to obey <b>CLIP</b>-shaped steering, so a CLIP encoder's gradient is <i>renderable</i> and a DINOv2 encoder's is partly <i>adversarial</i> → texture. It's a known problem (adversarial / off-manifold gradients). You can fix the gradient path (make the encoder robust, or add an adapter, or reward-fine-tune the generator), <b>or</b> sidestep it entirely by only ever using the encoder as a <i>score</i> (search / VLM / RL loop) — which is what your target paper should do.</div>
@@ -247,6 +247,49 @@
   \(\nabla_x r\) for each encoder, project via encode→decode (VAE or a few denoiser steps), report the
   surviving-norm ratio. <b>Prediction:</b> ratio\(_\text{CLIP}\) &gt; ratio\(_\text{DINO}\). And the
   downstream version is already measured: same pipeline, swap the encoder → CLIP coherent, DINOv2 texture.</p></div>
+
+  <div class="cbox"><h4>Grounded in prior results — the theory chain (no A/B needed)</h4>
+  <p><b>(i) Off-the-shelf gradients are off-manifold.</b> Networks are locally near-linear (Goodfellow
+  et al. 2015), so \(\nabla_x f\) is dominated by the highest-output-per-\(\lVert\cdot\rVert\) direction —
+  a high-frequency, off-manifold pattern; ascending it is the adversarial-example construction (Szegedy
+  et al. 2014).</p>
+  <p><b>(ii) Only robust encoders have on-manifold gradients.</b> Perceptually-aligned gradients require
+  adversarial robustness (Tsipras 2019; Santurkar 2019). Off-the-shelf CLIP and DINOv2 are non-robust →
+  both carry off-manifold gradient.</p>
+  <p><b>(iii) Diffusion guidance theory pinpoints the culprit.</b> MCG (Chung 2022) / MPGD (He 2024)
+  formalize that the guidance gradient's component <em>normal</em> to \(\mathcal M\) drives samples off the
+  manifold, and prove that projecting onto the tangent fixes it.</p>
+  <p><b>(iv) Our exact setting has a direct result.</b> Shen et al. 2024 (arXiv 2403.12404): training-free
+  loss-based guidance (a pretrained encoder's gradient on clean images — BrainDiVE/us) is more
+  adversarial-prone and slower than classifier guidance.</p>
+  <p><b>(v) CLIP-good / DINOv2-bad (architectural deduction).</b> SD conditions only on CLIP (Rombach
+  2022) → its renderable tangent includes \(\operatorname{span}(\partial G/\partial c)\) = CLIP-parametrized
+  directions. CLIP is contrastively image↔text aligned (Radford 2021) → CLIP-image gradients lie largely
+  in that span (high α). DINOv2 is self-distillation, no CLIP alignment (Oquab 2023), and SD has no
+  \(\partial G/\partial(\text{DINOv2})\) channel → large off-\(T\) part (low α).</p>
+  <p><b>Scope:</b> (i)–(iv) are established results; (v) is a deduction from SD's architecture + CLIP's
+  objective — together they <em>derive</em> "DINOv2 gradient is off-manifold for SD → texture" from theory.</p></div>
+
+  <div class="cbox"><h4>The deeper "why DINOv2" — sensitivity mismatch</h4>
+  <p>It is not that DINOv2 is a worse encoder — it is a mismatch between <b>what DINOv2 is sensitive to</b>
+  and <b>what SD can change</b>.</p>
+  <ul class="gl">
+    <li><b>What SD can change:</b> an image only along directions its latent \(z\) and CLIP conditioning
+    \(c\) produce. \(c\) parametrizes <em>global, semantic</em> directions (object/scene identity) — CLIP
+    was trained to align whole images with captions.</li>
+    <li><b>CLIP's gradient</b> asks for "more of a semantic category" (more face-like) → a global,
+    <em>renderable</em> change SD has a channel for → high α.</li>
+    <li><b>DINOv2's gradient</b> asks for changes in <em>fine-grained patch / texture / part statistics</em>
+    — because DINOv2 is trained by self-supervised <b>patch distillation</b> (invariance to augmentations,
+    dense correspondence), its most sensitive directions are local and textural, not caption-like. SD has
+    <b>no channel</b> to render "shift these patch statistics," so that direction is off-manifold → the
+    sampler approximates it with high-frequency texture.</li>
+    <li><b>Mechanistically:</b> DINOv2's image→feature map is steep in high-frequency directions
+    (great for discrimination) → \(\nabla_x(\text{score})\) is large along texture-like directions; CLIP,
+    tied to a low-dimensional semantic (text) space, has smoother, more global gradients.</li>
+  </ul>
+  <p><b>One line:</b> CLIP's "wishes" are <em>global semantic edits = what SD can render</em>; DINOv2's are
+  <em>local texture/part edits = what SD cannot render</em>. That overlap gap <b>is</b> the low α.</p></div>
 
   <h4 class="rh">B · Everything we tried to fix it — intuition · math · steps · result</h4>
 
@@ -1535,6 +1578,116 @@
   tool we <em>haven't</em> tried and that directly targets α is <b>manifold projection (MPGD)</b> — the
   natural next gradient-side experiment. Beyond that, the bigger wins are leaving gradients behind (plan 4
   / readout-head / DDPO).</p></div>
+</div>
+
+<div class="part" id="algos">
+  <h2>Part XIII</h2>
+  <h3>Algorithms — every method step by step, with a justification per step</h3>
+  <p class="lede">Exactly what each method does, as an algorithm, grounded in the code we ran. Each step
+  is followed by <em>why</em> it's there.</p>
+
+  <div class="pex"><h4>Baseline — raw gradient guidance (our <code>cond_fn</code>, runs inside every step)</h4>
+  <p><b>Goal:</b> steer SD 1.5 so the image maximizes ROI activation, by differentiating the encoder.</p>
+  <ol class="gl">
+    <li>\(\varepsilon=\mathrm{UNet}(x_t,t)\) — <em>why:</em> the sampler needs the noise prediction.</li>
+    <li>\(\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\varepsilon)/\sqrt{\bar\alpha_t}\) (Tweedie) — <em>why:</em>
+    the encoder only makes sense on a clean image; \(x_t\) is noisy/OOD, so score the model's guess of the
+    final image.</li>
+    <li>\(img=\mathrm{VAE.decode}(\hat x_0)\to[0,1]\) — <em>why:</em> the encoder reads pixels, not latents.</li>
+    <li>\(r=\operatorname{mean}_{v\in\mathrm{ROI}} f(img)\) — <em>why:</em> the scalar we push up.</li>
+    <li>\(g=\nabla_{x_t} r\) (autograd through decode+encoder) — <em>why:</em> latent direction that most
+    raises activation.</li>
+    <li>\(\text{grads}=s\,\lVert\varepsilon\rVert\,(g/\lVert g\rVert)\) — <em>why:</em> raw \(\lVert
+    g\rVert\) swings wildly across t/ROI; rescale to a fixed fraction of the model's own step (finicky-killer).</li>
+    <li>\(\tilde\varepsilon=\varepsilon-\sqrt{1-\bar\alpha_t}\,\text{grads}\); scheduler.step — <em>why:</em>
+    fold guidance into the noise prediction.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> texture — \(g\) dominated by the off-manifold component.</p></div>
+
+  <div class="pex"><h4>Plan 1 — gradient hygiene (replaces steps 3–5)</h4>
+  <ol class="gl">
+    <li>for \(i=1..N\): random-resized crop of \(img\) → 224 → \(r_i=f(\text{crop}_i)\) — <em>why:</em>
+    adversarial per-pixel directions disagree across crops and cancel; coherent signal survives.</li>
+    <li>\(r=\operatorname{mean}_i r_i-\lambda_{TV}\mathrm{TV}(img)-\lambda_{rng}\mathrm{range}(img)\) —
+    <em>why:</em> averaged = de-adversarialized; TV kills checkerboard, range kills blowup → on-manifold.</li>
+    <li>\(g=\nabla_{x_t}r\); then the normalized step + inject (as baseline). N=8, DPM.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> texture calmed but mushy.</p></div>
+
+  <div class="pex"><h4>Plan 2 — time-travel / resampling (needs DDIM)</h4>
+  <p><b>Goal:</b> let the prior re-absorb off-manifold kicks. Per step \(t\) in window [0.1,0.6]:</p>
+  <ol class="gl">
+    <li>\(x_{cur}=x_t\).</li>
+    <li>for \(rep=1..R\): (a) guided step on \(x_{cur}\to x_{t-1}\) — <em>why:</em> apply guidance; (b) if
+    not last, re-noise \(x_{cur}=\sqrt{\bar\alpha_t/\bar\alpha_{t-1}}\,x_{t-1}+\sqrt{1-\bar\alpha_t/
+    \bar\alpha_{t-1}}\,\epsilon\) — <em>why:</em> forward-diffuse one step so the next re-denoise
+    re-projects onto \(\mathcal M\) (the prior heals the off-manifold part).</li>
+    <li>keep the final \(x_{t-1}\). R=4.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> sharper, still texture; inflated on held-out.</p></div>
+
+  <div class="pex"><h4>Plan 4 — bridge + IP-Adapter (two phases)</h4>
+  <p><b>Offline — train the bridge:</b></p>
+  <ol class="gl">
+    <li>for 1000 images: \(d=\mathrm{DINOv2}(img)\), \(c=\mathrm{CLIP\text{-}H}(img)\) — <em>why:</em>
+    paired embeddings to learn the map.</li>
+    <li>train MLP \(B\): \((1-\cos(B(d),c))+0.5\,\mathrm{MSE}\) — <em>why:</em> learn DINO→CLIP
+    translation (cosine=direction, MSE=scale).</li>
+  </ol>
+  <p><b>Per ROI:</b></p>
+  <ol class="gl">
+    <li>score all 1000 with the DINOv2 ROI encoder; top-K=20 — <em>why:</em> find the ROI's favorites
+    (encoder as score, no gradient).</li>
+    <li>\(\bar e=\)mean(top-20 DINOv2 embeds) — <em>why:</em> distill "what the ROI likes" into one vector.</li>
+    <li>\(e_{clip}=B(\bar e)\) — <em>why:</em> translate into SD's language.</li>
+    <li>SD 1.5 + IP-Adapter, \(\text{ip}=[0,e_{clip}]\), prompt="", scale 0.8 → generate — <em>why:</em>
+    condition SD through the pretrained image-prompt pathway; empty text so only the ROI target drives it.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> photographic, honest.</p></div>
+
+  <div class="pex"><h4>Readout-head (two phases)</h4>
+  <p><b>Offline — train the head:</b></p>
+  <ol class="gl">
+    <li>label each image \(a_V=\)DINOv2 ROI score — <em>why:</em> the encoder defines the target (labels only).</li>
+    <li>for several \(t\): \(x_t=\)add_noise(VAE.encode(img),t); UNet(\(x_t,t,\varnothing\)); capture
+    mid-block \(\phi_t\); pool — <em>why:</em> collect \((\phi_t,t,a_V)\) so the head predicts the ROI
+    score from SD's OWN features at every noise level.</li>
+    <li>train MLP \(h_\psi(\phi_t,t)\to a_V\) (MSE) — <em>why:</em> a noise-aware predictor from renderable features.</li>
+  </ol>
+  <p><b>Generation:</b></p>
+  <ol class="gl">
+    <li>per step, UNet(\(x_t,t\)) (hook grabs \(\phi_t\)); \(g=\nabla_{x_t}(-h_\psi(\mathrm{pool}(\phi_t),
+    t)[\mathrm{ROI}])\); normalized step + inject — <em>why:</em> differentiating the head gives a
+    gradient that flows through SD's own features → on-manifold by construction.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> honest + selective — best gradient-side.</p></div>
+
+  <div class="pex"><h4>DDPO — RL reward (per round)</h4>
+  <ol class="gl">
+    <li>sample \(B\) trajectories from SD+LoRA with a stochastic DDIM sampler, storing each step's
+    \((x_t,x_{t-1},\log p_\theta)\) — <em>why:</em> policy gradient needs action log-probs; a stochastic
+    Gaussian step makes them analytic.</li>
+    <li>decode \(x_0\); \(R=a_V(x_0)\) — <em>why:</em> reward = ROI activation, paid once at the end.</li>
+    <li>advantage \(A=(R-\text{mean})/\text{std}\) — <em>why:</em> per-batch normalization stabilizes
+    REINFORCE (removes reward-scale dependence).</li>
+    <li>per transition: \(\text{ratio}=\exp(\log p_{new}-\log p_{old})\); loss \(=-\operatorname{mean}
+    \min(\text{ratio}\cdot A,\ \mathrm{clip}(\text{ratio})\cdot A)\); backprop → LoRA only — <em>why:</em>
+    PPO-clipped policy gradient makes high-advantage trajectories more likely; clip/KL keeps it on \(\mathcal M\).</li>
+    <li>Adam step; loop. 30 rounds × 8 (demo).</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> underpowered (2/4) — sample-starved.</p></div>
+
+  <div class="pex"><h4>REPA (ours)</h4>
+  <ol class="gl">
+    <li>load pretrained SiT-XL/2 + SD-VAE + our encoder — <em>why:</em> SiT features are DINOv2-aligned.</li>
+    <li>per flow step: \(v=\mathrm{SiT}(x,t,y_{null})\) (velocity, detached) — <em>why:</em> unconditional
+    velocity for the ODE step.</li>
+    <li>\(\hat x_0=x-t\,v\) — <em>why:</em> rectified-flow predicted clean latent to score.</li>
+    <li>in-window: \(g=\nabla_x f(\mathrm{decode}(\hat x_0))[\mathrm{ROI}]\); \(x_{next}=x+dt\,v+s\lVert v
+    \rVert(g/\lVert g\rVert)\) — <em>why:</em> add normalized encoder guidance to the flow.</li>
+  </ol>
+  <p class="foryou"><b>Outcome:</b> still texture — gradient went through the VAE (pixels), not SiT's
+  aligned features. Fix = readout-head on the SiT.</p></div>
 </div>
 <div class="part" id="refs">
   <h2>References</h2>
