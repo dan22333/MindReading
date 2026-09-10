@@ -268,8 +268,7 @@ MEETING_BRIEF = r'''
     <p><b>Math:</b> \(\bar e_{\text{ROI}}=\tfrac1K\sum_k e_k\) (top-K DINO centroid); \(e_{\text{clip}}=
     B(\bar e)\) via a bridge trained with \(\text{cos}+\lambda\,\text{MSE}\); condition SD on
     \(e_{\text{clip}}\) through IP-Adapter.</p>
-    <p><b>Steps:</b> score an image bank per ROI → average top-K DINO embeddings → train MLP bridge
-    DINO→CLIP → IP-Adapter generation (no gradient).</p>
+    <p><b>Steps:</b> (1) score an image bank with <b>your DINOv2 encoder</b> → top-K per ROI; (2) average those top-K DINOv2 embeddings; (3) train MLP bridge DINO→CLIP; (4) IP-Adapter generation (no gradient). <b>The encoder is still fully used</b> — as a <em>scorer</em> (step 1) and a <em>feature extractor</em> (step 2); we simply never differentiate it, which is what removes the α problem.</p>
     <p class="foryou"><b>Result:</b> <b>best realism</b> (only photographic column); held-out 4/4, +1.69,
     <b>honest</b> (score even rises on the independent encoder). Its looseness: faces↔bodies (whole people).</p></div>
 
@@ -318,6 +317,9 @@ MEETING_BRIEF = r'''
 # insert the meeting brief at the very top (right before Part 0)
 ORIG = ORIG.replace('<div class="part" id="bg">\n  <h2>Part 0</h2>',
                     MEETING_BRIEF + '\n<div class="part" id="bg">\n  <h2>Part 0</h2>')
+ORIG = ORIG.replace(
+    '(provably prone to adversarial gradients',
+    '(training-free gradient guidance is shown to be more prone to adversarial gradients than classifier guidance')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
