@@ -88,6 +88,30 @@ ORIG = ORIG.replace(
     'coherent vs DINOv2 texture — see Part VII) and the held-out reward-hacking. So the quality gap is a '
     'fact; "\\(\\alpha\\) explains it" is the best-supported explanation.</p></div>'
     'Why CLIP is aligned (high')
+# unpack the dense Part V fix-stack intro (what each cited work actually found/did)
+ORIG = ORIG.replace(
+    'Below, in priority order (biggest win first).</p>',
+    'Below, in priority order (biggest win first).</p>'
+    '<div class="cbox"><h4>What those references actually found / did</h4>'
+    '<p><b>Shen et al., NeurIPS 2024</b> — the "why it\'s finicky" result. They formally analyzed '
+    'CLIP-guided diffusion and showed the guidance gradient is <em>provably prone to adversarial '
+    'directions</em>: the CLIP score can be spiked by imperceptible, texture-like perturbations that '
+    'don\'t change what the image depicts. Their fix is an <em>adaptive, analytically-derived step '
+    'size</em> (scale by the score-vs-noise magnitudes) — the principled version of "normalize the '
+    'step."</p>'
+    '<p><b>Crowson / Disco Diffusion</b> — not a formal paper but the battle-tested community codebase '
+    'that first made CLIP guidance actually produce images instead of static. It introduced the hands-on '
+    'fix-stack we use: <b>cutouts</b> (average the gradient over many random crops so per-pixel '
+    'adversarial noise cancels), the <b>spherical-distance loss</b>, and <b>TV / range regularizers</b>. '
+    'This is the practical origin of our <b>plan 1</b>.</p>'
+    '<p><b>The "guidance-theory papers"</b> = classifier &amp; classifier-free guidance '
+    '(Dhariwal&amp;Nichol; Ho&amp;Salimans), DPS, FreeDoM, and MCG/MPGD — the formal framework for '
+    '<em>how</em> to steer a diffusion sampler and keep it on-manifold (each expanded in Part XI, and '
+    'mapped to what we ran in Part XII).</p>'
+    '<p><b>The one-line point of this whole section:</b> these raise the floor for <em>any</em> gradient '
+    'guidance (DINOv2 included) — but they <b>cannot fix the CLIP↔DINOv2 manifold mismatch itself.</b> '
+    'That needs Part VI: use the encoder as a <em>score</em> (α irrelevant), <em>reroute</em> the '
+    'gradient through renderable features, or <em>realign</em> the encoder.</p></div>')
 MJS = (SCR / "mathjax-tex-svg.js").read_text()
 OUT = SCR / "merged.html"
 ROIS = ["faces", "places", "words", "bodies"]
