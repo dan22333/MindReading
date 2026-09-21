@@ -4,3 +4,23 @@ __pycache__/
 
 # external clones / large weights (not our work)
 brainit-fmri/
+
+# brainconcept: keep code only — ignore generated reports, images, data, papers
+brainconcept/RESULTS/
+brainconcept/outputs/
+brainconcept/outputs_faces/
+brainconcept/report/
+brainconcept/**/outputs/
+Papers/
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+ConceptLab_to_fMRI_explainer.html
+brainconcept/vendor_conceptlab/
+brainconcept/*.html
