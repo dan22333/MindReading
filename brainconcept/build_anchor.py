@@ -78,7 +78,37 @@ def prior_image_embs(model, prompt: str, batch_size: int,
     return img_feat.float()  # [batch_size, 768]
 
 
+@torch.no_grad()
+def text_embs(model, terms, device):
+    """Return [K, 768] L2-normed CLIP *text* embeddings (pooled text projection), one per term.
+    Mirrors the txt_feat path in generate_clip_emb so the text anchors sit in the same CLIP
+    joint space as the optimized image embedding (image<->text cosine, modality-gap-limited)."""
+    t2_eos_token_id = len(model.tokenizer2.encoder) - 1
+    max_txt_length = model.prior.model.text_ctx
+    out = []
+    for term in terms:
+        tok, mask = model.tokenizer2.padded_tokens_and_mask([term], max_txt_length)
+        tok = tok.to(model.device)
+        x = model.clip_model.token_embedding(tok).type(model.clip_model.dtype)
+        x = x + model.clip_model.positional_embedding.type(model.clip_model.dtype)
+        x = x.permute(1, 0, 2)
+        x = model.clip_model.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = model.clip_model.ln_final(x).type(model.clip_model.dtype)
+        txt_feat = (x[torch.arange(x.shape[0]), tok.eq(t2_eos_token_id).nonzero()[:1, -1]]
+                    @ model.clip_model.text_projection).float()
+        txt_feat = txt_feat / txt_feat.norm(p=2, dim=-1, keepdim=True)
+        out.append(txt_feat.to(device))
+    return torch.cat(out, dim=0)                                        # [K, 768]
+
+
 def build(model, terms, n_samples, batch, device):
+    """Return the FULL individual image-prior anchor set (not just the centroid).
+
+    img_set = [len(terms)*n_samples, 768] L2-normed prior samples. The contrast loss scores
+    the optimized embedding against each row individually (mean+max), so we keep them all;
+    the averaged centroid is also returned for sanity/back-compat.
+    """
     all_normed = []
     for term in terms:
         got = 0
@@ -94,7 +124,7 @@ def build(model, terms, n_samples, batch, device):
     anchor = anchor / anchor.norm(p=2)                                 # renorm
     # sanity: mean pairwise cos of samples to the anchor (tightness of the centroid)
     tight = (stacked @ anchor).mean().item()
-    return anchor, stacked.shape[0], tight
+    return anchor, stacked, tight
 
 
 def main():
@@ -122,11 +152,17 @@ def main():
     for t in terms:
         print(f"  - {t}")
 
-    anchor, n_total, tight = build(model, terms, args.n_samples, args.batch, args.device)
+    anchor, img_set, tight = build(model, terms, args.n_samples, args.batch, args.device)
+    text_set = text_embs(model, terms, args.device)                    # [K, 768] normed CLIP text
+    n_total = img_set.shape[0]
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"anchor": anchor.cpu(), "terms": terms, "n_total": n_total,
+    torch.save({"anchor": anchor.cpu(),                                # centroid (back-compat)
+                "img_set": img_set.cpu(),                              # [N,768] individual image priors
+                "text_set": text_set.cpu(),                            # [K,768] individual CLIP-text
+                "terms": terms, "n_total": n_total,
                 "tightness_cos": tight}, args.out)
-    print(f"Saved anchor [{tuple(anchor.shape)}] from {n_total} samples -> {args.out}")
+    print(f"Saved anchor set img_set{tuple(img_set.shape)} text_set{tuple(text_set.shape)} "
+          f"from {len(terms)} term(s) -> {args.out}")
     print(f"Centroid tightness (mean sample->anchor cos): {tight:.3f} "
           f"(higher = tighter; expect lower for the 10-term e2)")
 

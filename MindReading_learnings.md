@@ -54,6 +54,118 @@ The learning in 1-4 sentences.
 ```
 
 
+<a id="l-20260929-cosine-vs-classifier"></a>
+
+## 2026-09-29 — A cosine-to-prototype repel cannot leave a category; only a two-class discriminant can
+**Type:** insight  
+**Phase:** Project design
+
+We want an image that maximises a face-ROI response yet is *not a face*: a drive term $\mathrm{ReLU}(z^{\*}-\text{drive})$ pulls the embedding $z$ into the high-face-ROI region while a **novelty** term pushes it out of face-space. We tried two novelty terms and — crucially — only their *direction* differs.
+
+**Cosine repel (E2).** Penalise the (hinged) similarity to $N\!\approx\!1000$ face-image anchors $a_i$. With $z$ and each $a_i$ unit-normalised, $\cos(z,a_i)=z\cdot a_i$, so the mean term is **linear**:
+$$S(z)=\frac1N\sum_i \cos(z,a_i)=z\cdot\Big(\tfrac1N\sum_i a_i\Big)=z\cdot\bar a,\qquad \nabla_z S=\bar a .$$
+So "cosine to each anchor, then average" **equals** "cosine to the centroid $\bar a$" (up to the scalar $|\bar a|$), and the repel descends along $-\bar a$ — straight away from the *average* face. Note $\bar a$ is **not** unit: $|\bar a|^2=\frac1{N^2}\big(N+\sum_{i\neq j}a_i\!\cdot a_j\big)\le 1$, with $|\bar a|$ = the anchor-cluster tightness.
+
+**Classifier repel (E3).** Penalise $P(\text{face})=\sigma(w^\top z+b)$; it descends along $-w$. Modelling each class as a Gaussian with shared covariance $\Sigma$ and taking the log-posterior-ratio, the $z^\top\Sigma^{-1}z$ terms cancel (⇒ linear boundary) and leave the LDA/logistic optimum
+$$w=\Sigma^{-1}\,(\mu_{\text{face}}-\mu_{\text{nonface}}).$$
+$\Sigma^{-1}$ is **whitening** ($\Sigma=Q\Lambda Q^\top\Rightarrow\Sigma^{-1}=Q\Lambda^{-1}Q^\top$: down-weight high-variance/noisy directions, up-weight tight ones), and class separability is the Mahalanobis distance $d^2=(\mu_{\text{face}}-\mu_{\text{nonface}})^\top\Sigma^{-1}(\mu_{\text{face}}-\mu_{\text{nonface}})$ — larger $d$ ⇒ steeper, more confident sigmoid (our probe: held-out AUC $=1.0$, so large $d$).
+
+**The one-line difference.** The cosine repel is the classifier with two pieces deleted: no $\mu_{\text{nonface}}$ (it only knows the face mean) and no $\Sigma^{-1}$ (no whitening) — strip them from $w$ and you are left with $\approx\mu_{\text{face}}=\bar a$. So $-\bar a$ = "away from the average face," but the face region has width along $-\bar a$ (atypical/decorated faces have low centroid-cosine yet are still faces), so you slide to the *weird edge of face-space and stay a face*. $-w$ = "toward the other class, across the whitened boundary," so it actually exits.
+
+**Why it matters:** This is the mathematical reason E2 drove $\cos$ to its hinge ($\approx0.31$) yet produced only **decorated human faces**, while E3 left human-face-space. To *leave* a set you need a signal informed by the complement (negatives) and the covariance — not distance to a prototype.
+**How to apply:** For any "generate X-absent" objective use a discriminatively-trained (X vs not-X) probe as the novelty term, not cosine to an X-example bank. Normalising $\bar a$ only rescales the gradient magnitude ($\bar a$ vs $\bar a/|\bar a|$), never its direction — so it is not a fix. The negative class must span what "not-X" means: see [full entry](#l-20260929-classifier-relocates).
+**Source:** derivations in artifacts `claude.ai/code/artifact/4d6d12dd-4a76-459e-882d-0311523178dd` (cosine vs classifier) and `.../5e6a3913-5dc4-427f-8dc4-5f7f6b92c91a` (LDA); loss in `brainconcept/vendor_conceptlab/training/coach.py` (`classifier_repel` branch).
+
+
+---
+
+<a id="l-20260929-classifier-relocates"></a>
+
+## 2026-09-29 — A classifier repel moves toward whatever you label "not-X" — we labelled animals non-face, so it made animal faces
+**Type:** gotcha  
+**Phase:** Project design
+
+E3's classifier drove $P(\text{human face})\to 0.07$ and BLIP's "is there a *human* face?" to 0.00 on every run — yet the images were unmistakable **animal faces** (badger/hedgehog/raccoon-like creatures), and held-out DINOv2 still read the face ROI at $+1.7$ to $+2.8$. Face cortex responds to animal and pareidolic faces, so these *are* faces — just not human. The cause is mechanical: $-w$ points toward $\mu_{\text{nonface}}$, and our negative set contained animals (`dog/cat/bird/fish`), so "not-a-face" literally included animal faces. E3 did exactly what the labels said. It exploited the gap between "human face" (penalised) and "face structure" (what drives the ROI), not a genuine non-face solution.
+
+**Why it matters:** "Works" is defined entirely by the class boundary you draw. A clean-looking escape (face-rate 0.00) can be definition-gaming; we only caught it by looking at the pixels, not the BLIP flag. It is also the strongest evidence so far for a possible biological ceiling — strong face-ROI drive may *require* face structure.
+**How to apply:** To test a genuine non-face driver, move animal + pareidolic faces into the **positive** class (so $\mu_{\text{face}}$ includes them and $\mu_{\text{nonface}}$ is pure objects) and change the honest judge to "any face-like pattern (human/animal/object)?". Excluding animals from *both* classes does **not** work — it leaves them unpenalised. Always eyeball the images; never trust a single binary judge.
+**Source:** `brainconcept/build_face_banks.py` `FACE_TERMS`/`NONFACE_TERMS`; report artifact `claude.ai/code/artifact/1e904e9e-74bd-493c-933d-2e4ff33cfd85`.
+
+
+---
+
+<a id="l-20260928-comp-clamp"></a>
+
+## 2026-09-28 — Contrast selectivity is gamed by suppressing the complement; clamp it at zero to force real drive
+**Type:** gotcha  
+**Phase:** Project design
+
+We defined drive as a **selectivity contrast** $z_{\text{faces}}-z_{\text{comp}}$ (faces ROI minus the complement = bodies+places+words, each z-scored to its own natural-image baseline) and floored it: $\mathrm{ReLU}(z^{\*}-(z_{\text{faces}}-z_{\text{comp}}))$. Because $z_{\text{comp}}$ can go negative, the contrast is inflated by *positive minus negative*: e.g. round-1 E1 at $z^{\*}=1$ reached "selectivity" $+1.86$ from $z_{\text{faces}}=+0.08$ and $z_{\text{comp}}=-1.78$ — i.e. $\approx 96\%$ complement-suppression and near-zero real face drive. The floor was satisfied without driving faces at all.
+
+**Fix (`comp_clamp`):** use $z_{\text{faces}}-\max(z_{\text{comp}},0)$. Driving the complement *below* baseline earns no free selectivity, so the floor can only be met by real face drive. Effect in round 2: $z_{\text{comp}}\!\approx\!0$ everywhere and $z_{\text{faces}}$ genuinely reached $z^{\*}$ ($z^{\*}=2\Rightarrow z_{\text{faces}}\approx2.3$, vs the fake $1.1$ before).
+
+**Why it matters:** A difference-of-two-normalised-quantities objective silently rewards tanking the subtrahend; the metric then certifies "selective" images that do not drive the target. Any contrast/selectivity loss needs this guard.
+**How to apply:** Clamp the complement term at its baseline ($\max(\cdot,0)$ after z-scoring), or add a separate direct floor on $z_{\text{faces}}$. Config flag `comp_clamp` in `train_config.py`; branch in `coach.py`.
+**Source:** `brainconcept/vendor_conceptlab/training/coach.py` contrast branch; round-1 vs round-2 tables in report artifacts.
+
+
+---
+
+<a id="l-20260928-round2-result"></a>
+
+## 2026-09-28 — Image-bank → human faces, classifier → animal faces, text → inert: every strong ROI driver is some kind of face
+**Type:** insight  
+**Phase:** Project design
+
+Round 2 (24 runs, $z^{\*}\!\in\!\{2,2.5,3,3.5\}\times w\!\in\!\{1,1.5,2\}$, `comp_clamp` on) plus a text control, all with the same drive term and held-out validation:
+
+| novelty repel | anchor | outcome | BLIP human-face | held-out DINOv2 $z$ |
+|---|---|---|---|---|
+| E2 cosine | 1000 face **images** | human faces | 1.00 | $+2.2\ldots+3.5$ |
+| Text cosine | 1000 face **text** phrasings | human faces | 0.50 | up to $+3.39$ (highest) |
+| E3 classifier | face probe on $z$ | **animal faces** | 0.00 | $+1.7\ldots+2.8$ |
+
+All three produce **real** ROI drivers (a second, non-CLIP encoder agrees), and all three are faces of some kind. Two calibration facts: a real/generated face sits at $z_{\text{faces}}\!\approx\!+1.8$, so these optimised images ($+2.5$ to $+3.4$) are **super-stimuli** — above a natural face. And the text repel is **inert**: image$\leftrightarrow$text cosine is pinned at $\sim0.06$–$0.13$ by CLIP's modality gap, so driving it to $0.02$ moved $z$ along a direction nearly orthogonal to image-faceness and produced the *strongest* face driver of all.
+
+**Why it matters:** With an honest metric and held-out validation, we could not yet make a *non-face* strong driver — only human-face, animal-face, or (via text) human-face super-stimuli. Novelty must be measured in **image space** (the text axis is orthogonal to it), and even the image-space classifier only relocated to animal faces ([full entry](#l-20260929-classifier-relocates)).
+**How to apply:** Keep DINOv2 (non-CLIP) as the honest drive check; drop the text repel; treat $z_{\text{faces}}\approx1.8$ as the "one real face" yardstick when reading magnitudes.
+**Source:** `brainconcept/RESULTS/Round2_E2_vs_E3_report.pdf`; artifact `claude.ai/code/artifact/1e904e9e-74bd-493c-933d-2e4ff33cfd85`.
+
+
+---
+
+<a id="l-20260928-imgcos-decoupled"></a>
+
+## 2026-09-28 — Anchor cosine is decoupled from perceptual faceness — the repel hits its hinge yet the image stays a face
+**Type:** insight  
+**Phase:** Project design
+
+The cosine repel *succeeds on its own metric and fails at the goal*. In E2 at $z^{\*}=2$, $\cos(z,\text{bank})$ fell from $0.58$ (init) to $\approx0.31$ by step 500 and **plateaued at the hinge** $c_{\text{img}}=0.30$ — a value comparable to a natural *non-face* photo (naturals sit at $0.32$–$0.44$ to the bank) — yet BLIP still reported a human face. Even more telling: the $z^{\*}=3$ run reached a *lower* $\cos=0.23$ than the escaped $z^{\*}=1$ run ($0.32$) while being **more** of a face. So low anchor-cosine $\neq$ non-face. Escape in round 1 came from a **low drive floor** (weak drive lets $z$ drift off faces), not from the repel reducing the cosine; and more steps do not help — the hinge zeroes the gradient below $c_{\text{img}}$ by design, so the cosine simply parks there.
+
+**Why it matters:** A repel that provably drives its surrogate to target while the true property is unchanged is the textbook symptom of a mis-specified proxy — here explained by [the one-class-vs-discriminant entry](#l-20260929-cosine-vs-classifier). It also rules out "lower the threshold" and "train longer" as fixes.
+**How to apply:** Validate a novelty proxy against the actual property (a held-out judge on the decoded image), not against the proxy's own value; if the proxy is a linear/cosine one-class score, expect this decoupling.
+**Source:** per-step trajectories in `brainconcept/RESULTS/contrast/ours_r2_e2_*.json`; round-1 report `StageB_E1E2_frontier_report.pdf`.
+
+
+---
+
+<a id="l-20260927-contrast-loss"></a>
+
+## 2026-09-27 — The contrast/floor loss: a drive release-valve, mean+max hinged repel, and a decode→re-encode realness monitor
+**Type:** pattern  
+**Phase:** Project design
+
+The loss that underlies all of the above (ConceptLab loop, faces ROI, subject S1), optimising one learnable token's embedding $z$ (the diffusion-prior output):
+$$L=\underbrace{\mathrm{ReLU}\!\big(z^{\*}-(z_{\text{faces}}-\max(z_{\text{comp}},0))\big)}_{\text{drive (selectivity floor)}}+\;w\cdot\underbrace{\big[\operatorname{mean}_i \mathrm{clamp}(\cos(z,a_i),c)+\max_i \mathrm{clamp}(\cos(z,a_i),c)\big]}_{\text{novelty repel}} .$$
+Three design choices earned their place: (1) the **floor** is a release-valve — once $z_{\text{faces}}-z_{\text{comp}}\ge z^{\*}$ the drive gradient is exactly zero, so the repel can act unopposed; without it the maximise-drive term is insatiable and rebounds into face-space. Measured: at convergence with the floor met, drive contributes $0$ to the loss and the residual is $\approx60$–$95\%$ the image-repel term. (2) **mean + max** hinged aggregation (ConceptLab's negative-loss form): mean leaves the anchor centroid, max is a hard-negative that stops the image hugging a single anchor; the per-anchor `clamp(cos, c)` gives zero gradient below $c$ so each anchor is pushed only until "far enough." (3) A **drift monitor** $\cos(z,\,\mathrm{encode}(\mathrm{decode}(z)))$ logged at checkpoints (not in the loss) catches off-manifold degeneration — healthy runs sit $\approx0.75$–$0.9$; it falls as you push $z^{\*}$ up or $c$ down.
+
+**Why it matters:** These are reusable ingredients for constrained generation: a floor to make a "reach a level then stop" target (avoids the maximise-rebound), mean+max hinges for repelling from a set, and a cheap decode→re-encode consistency check for realness that needs no extra model.
+**How to apply:** Prefer $\mathrm{ReLU}(\text{target}-\text{quantity})$ over raw maximise/minimise whenever "enough" is well-defined; log decode→re-encode cosine as a free off-manifold alarm.
+**Source:** `brainconcept/vendor_conceptlab/training/coach.py` (contrast branch, `decode_reencode_cos` in `kandinsky2_1_model.py`); background in [[C.4 — Guided generation mechanics]].
+
+
+---
+
 <a id="l-20260810-gap-analysis"></a>
 
 ## 2026-08-10 — Our project is the unoccupied cell between BrainDiVE and BrainCause — and BrainCause names it as future work
@@ -1116,3 +1228,27 @@ Each chapter collects pointers into Part A. Chapters are created on demand.
 
 
 *No entries yet.*
+
+
+## C.9 — Contrast-loss experiments: escaping a category while driving its ROI
+
+*Scope: the brainconcept faces experiments — the loss, the drive fix, E2/E3/text results, and the theory of why cosine can't leave a class. Phase: Project design.*
+
+
+> **Learned 2026-09-29 —** A cosine-to-prototype repel cannot leave a category; only a two-class discriminant can  
+> → [full entry](#l-20260929-cosine-vs-classifier)
+
+> **Learned 2026-09-29 —** A classifier repel moves toward whatever you label "not-X" — we labelled animals non-face, so it made animal faces  
+> → [full entry](#l-20260929-classifier-relocates)
+
+> **Learned 2026-09-28 —** Contrast selectivity is gamed by suppressing the complement; clamp it at zero to force real drive  
+> → [full entry](#l-20260928-comp-clamp)
+
+> **Learned 2026-09-28 —** Image-bank → human faces, classifier → animal faces, text → inert: every strong ROI driver is some kind of face  
+> → [full entry](#l-20260928-round2-result)
+
+> **Learned 2026-09-28 —** Anchor cosine is decoupled from perceptual faceness — the repel hits its hinge yet the image stays a face  
+> → [full entry](#l-20260928-imgcos-decoupled)
+
+> **Learned 2026-09-27 —** The contrast/floor loss: a drive release-valve, mean+max hinged repel, and a decode→re-encode realness monitor  
+> → [full entry](#l-20260927-contrast-loss)
