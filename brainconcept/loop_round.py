@@ -57,7 +57,13 @@ def main():
     def step_of(p):
         d = "".join(c if c.isdigit() else " " for c in Path(p).stem).split()
         return int(d[0]) if d else -1
-    run_dirs = sorted(glob.glob(str(BC/f"vendor_conceptlab/outputs/loop_r{R}_s*")))
+    # restrict to THIS round's runs (runs.txt) — a loose glob also matches stale same-name dirs
+    runs_file = BC/f"loop_r{R}_runs.txt"
+    if runs_file.exists():
+        names = [l.strip() for l in open(runs_file) if l.strip()]
+        run_dirs = [str(BC/f"vendor_conceptlab/outputs/{n}") for n in names]
+    else:
+        run_dirs = sorted(glob.glob(str(BC/f"vendor_conceptlab/outputs/loop_r{R}_s*")))
     runs = []
     for d in run_dirs:
         cands = [x for x in glob.glob(d + "/images/*_step_images.jpeg") if "init" not in x]
@@ -86,8 +92,10 @@ def main():
     drv = np.where(alldino >= args.drive_thresh)[0]
     print(f"[round {R}] drivers (dino>= {args.drive_thresh}): {len(drv)}/{len(allE)}", flush=True)
 
-    # BLIP label the drivers
-    face_rate, theme = float("nan"), "none"
+    # BLIP label the drivers. NOTE: this is a LABEL for the archive, NOT a stop gate.
+    # The question is BROAD (any face-like structure incl. animal/doll/mask/pareidolia) so
+    # doll/mask faces are not mistaken for "non-face" — but it never halts the loop.
+    face_like_rate, theme = float("nan"), "none"
     if len(drv):
         from transformers import Blip2Processor, Blip2ForConditionalGeneration
         proc = Blip2Processor.from_pretrained("Salesforce/blip2-flan-t5-xl", use_fast=False)
@@ -98,15 +106,16 @@ def main():
             inp = proc(images=Image.fromarray(img).resize((224,224)), text=q, return_tensors="pt").to(device, torch.float16)
             with torch.no_grad(): o = blip.generate(**inp, max_new_tokens=6)
             return proc.batch_decode(o, skip_special_tokens=True)[0].strip().lower()
-        QF = "Question: Is there a human face in this image? Answer yes or no. Answer:"
+        QF = ("Question: Is there any face or face-like structure (human, animal, doll, mask, "
+              "or object pareidolia) in this image? Answer yes or no. Answer:")
         QO = "Question: What is the main object in this image? Answer:"
         faces, objs = [], []
         for i in drv:
             faces.append(ask(keep_imgs[i], QF).startswith("yes"))
             objs.append(ask(keep_imgs[i], QO))
-        face_rate = float(np.mean(faces))
+        face_like_rate = float(np.mean(faces))
         theme = Counter([o.split()[-1] if o else "?" for o in objs]).most_common(1)[0][0]
-        print(f"[round {R}] face_rate {face_rate:.2f}  theme '{theme}'  objs={Counter(objs).most_common(3)}", flush=True)
+        print(f"[round {R}] face_like_rate {face_like_rate:.2f}  theme '{theme}'  objs={Counter(objs).most_common(3)}", flush=True)
 
     # intra-round diversity (seed-diversity check): mean pairwise cos among drivers
     diversity = None
@@ -123,15 +132,18 @@ def main():
         torch.save(arch, args.archive)
         print(f"[round {R}] archive += '{mode}' ({len(drv)} embs); archive modes={list(arch.keys())}", flush=True)
 
-    # stop signals
-    success = bool(len(drv) and not np.isnan(face_rate) and face_rate <= 0.2)   # real driver, not a face
+    # stop signal: EXHAUSTION ONLY. A round is "dry" when no tile clears the held-out
+    # DINOv2 drive bar (--drive_thresh). The loop stops on 2 consecutive dry rounds
+    # (ROI can no longer be driven by anything novel) — NOT on any face judgement.
+    # face_like_rate is recorded purely as a label describing what this round's drivers are.
+    dry = bool(len(drv) == 0)
     meta = {"round": R, "n_tiles": int(len(allE)), "n_drivers": int(len(drv)),
+            "drive_thresh": float(args.drive_thresh),
             "dino_mean": float(np.nanmean(alldino)), "dino_max": float(np.nanmax(alldino)),
-            "face_rate": face_rate, "theme": theme, "diversity": diversity,
-            "dry_round": bool(len(drv) == 0), "non_face_driver": success,
-            "archive_modes": list(arch.keys())}
+            "face_like_rate": face_like_rate, "theme": theme, "diversity": diversity,
+            "dry_round": dry, "archive_modes": list(arch.keys())}
     json.dump(meta, open(outdir/f"round_{R}.json", "w"), indent=2)
-    print(f"[round {R}] {'NON-FACE DRIVER FOUND' if success else ('DRY ROUND' if len(drv)==0 else 'face/animal driver')}", flush=True)
+    print(f"[round {R}] {'DRY ROUND (no novel driver >= %.1f)' % args.drive_thresh if dry else 'driver(s) found -> archived + forbidden'}", flush=True)
     print("LOOP_ROUND_DONE", flush=True)
 
 

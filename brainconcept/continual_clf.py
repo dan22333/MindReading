@@ -31,12 +31,28 @@ def main():
     ap.add_argument("--min_auc", type=float, default=0.97)
     ap.add_argument("--epochs", type=int, default=400)
     ap.add_argument("--max_per_mode", type=int, default=400, help="replay cap per old mode")
+    ap.add_argument("--prune_cos", type=float, default=0.85,
+                    help="drop negatives with cos > this to ANY discovered positive (keep negs a clean non-driver set)")
     args = ap.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     archive = torch.load(args.archive, map_location="cpu")        # {mode: [N,768]}
     neg = torch.load(args.neg, map_location="cpu")["emb"].float()
     neg = neg / neg.norm(dim=-1, keepdim=True)
+
+    # prune negatives that overlap discovered positives -> keep the negative set a clean non-driver reference.
+    # (a random-prompt image that looks like a found driver must not sit in both classes.)
+    if archive:
+        allpos = torch.cat([torch.as_tensor(e, dtype=torch.float32) for e in archive.values()])
+        allpos = allpos / allpos.norm(dim=-1, keepdim=True)
+        maxcos = torch.empty(len(neg))
+        for i in range(0, len(neg), 2048):
+            maxcos[i:i+2048] = (neg[i:i+2048] @ allpos.t()).max(dim=1).values
+        keep = maxcos < args.prune_cos
+        nd = int((~keep).sum())
+        if nd:
+            print(f"[clf] pruned {nd}/{len(neg)} negatives with cos>{args.prune_cos} to a positive mode", flush=True)
+            neg = neg[keep]
 
     # build positives with per-mode train/val split (for per-mode recall + replay cap)
     pos_tr, pos_va, mode_va = [], [], {}
