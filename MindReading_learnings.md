@@ -54,6 +54,43 @@ The learning in 1-4 sentences.
 ```
 
 
+<a id="l-20261028-clusters-not-concept"></a>
+
+## 2026-10-28 — A cluster-repel classifier forbids regions, not the concept — so the loop keeps the driver and swaps context forever
+
+**Type:** insight
+**Phase:** Project design
+
+The iterative novelty loop (generate a face-ROI driver → add its embeddings to an archive → retrain a logistic "forbidden" classifier on archive-vs-random-objects → re-generate under repel → repeat) ran **9 rounds and never escaped faces, nor ever went dry**. The face-like series $R_0\ldots R_8$ was $1.00,0.69,0.89,0.36,0.99,0.77,0.75,0.84,0.83$: only $R_3$ (teddy bears) dipped below $0.5$ and it bounced straight back; $R_7$–$R_8$ were openly human faces. Every round still found $79$–$159$ of $160$ tiles clearing the held-out DINOv2 bar ($z\ge1.5$). This is the generalisation of [the cosine-vs-classifier entry](#l-20260929-cosine-vs-classifier) and [the classifier-relocates entry](#l-20260929-classifier-relocates) to the *growing-archive* setting.
+
+## The two forces and why their optimum is "face + novel context"
+
+Each generated image is optimised under
+$$L \;=\; \underbrace{\mathrm{ReLU}\!\big(2.0-(z_{\text{faces}}-\mathrm{ReLU}(z_{\text{comp}}))\big)}_{\text{drive}} \;+\; \underbrace{w_{\text{img}}\,\mathrm{ReLU}\!\big(P_{\text{forbidden}}(e)-p^{*}\big)}_{\text{repel}},\qquad P_{\text{forbidden}}(e)=\sigma(w^\top e+b).$$
+
+The drive term is only satisfiable **with a face** (empirically nothing else reaches selectivity $\ge 2.0$), so the face can never be dropped. Round 0 archived *bare* creature/human faces, so a bare face scores **high** $P_{\text{forbidden}}$ and repel pushes away from it. The generator is boxed between "must keep a face" (drive) and "can't sit on a bare face" (repel); the only escape is **face + context not yet archived** — the face holds $z_{\text{faces}}$ up, the added context (orange/candle/megaphone) slides the *whole-image* embedding $e$ out of the forbidden blob so $P_{\text{forbidden}}<p^{*}$. Context is the free variable that satisfies repel without touching the face that satisfies drive.
+
+## Why this is specification, not balance — rebalancing cannot fix it
+
+The classifier weight is the LDA/logistic direction $w=\Sigma^{-1}(\mu_{\text{archive}}-\mu_{\text{objects}})$. It encodes *"is $e$ inside one of the blobs I have seen?"* — **not** *"does the image contain a face?"*. Face-space is far larger than the $\sim 9$ archived blobs and **every point in it still drives the ROI**, so there is always an un-forbidden, still-face-ful region to flee to ⇒ never face-free (drive needs the face) and never dry (something always drives).
+
+Cranking $w_{\text{img}}\to\infty$ does **not** help: $P_{\text{forbidden}}$ can be driven to $\approx 0$ *while keeping a face* (just exit the blob faster), because the penalty specifies "not these clusters," not "no face." The only regime where cluster-repel would work is the unreachable limit where the archive tiles **all** of face-space, making $\mu_{\text{archive}}$ the general face mean and $w$ a true face/non-face axis. At $\sim 146$ images in one cluster per round, that is hopelessly sample-inefficient. So the knob to turn is **what you penalise**, not how hard.
+
+## The loss that tests the real question
+
+Replace cluster-repel with a **face-concept** penalty from a detector $F(\text{image})$ that fires on face structure in *any* context (positives spanning human/animal/doll/mask/pareidolia across scenes; negatives pure objects), and run it as a **constrained frontier sweep** rather than a fixed-weight sum:
+$$\max_{\text{token}}\; \big(z_{\text{faces}}-\mathrm{ReLU}(z_{\text{comp}})\big)\quad\text{s.t.}\quad F(\text{image})\le\tau,\qquad \tau:\ \text{loose}\to 0.$$
+The **shape of the frontier** $\;\max z_{\text{faces}}(\tau)\;$ is the answer: if it stays high as $\tau\to 0$, a genuine non-face driver exists (found it); if it collapses to the one-real-face baseline $z_{\text{faces}}\approx1.8$, the **biological ceiling** is confirmed. $F$ must be structurally different from the CLIP drive encoder (else it decouples exactly like the anchor cosine — see [imgcos-decoupled](#l-20260928-imgcos-decoupled)), and escape must be validated with an **independent, non-differentiable** face detector on the decoded image, mirroring how held-out DINOv2 gates drive.
+
+> **Takeaway:** To *ban a concept* in a generate-and-forbid loop, the penalty must be a concept detector that generalises across context, not a discriminator of the specific images you have already found. A cluster classifier can only chase blobs; it structurally cannot express "no faces," so no amount of rebalancing the drive/repel weights will make the loop escape — and the decisive readout is the drive-vs-face-ness frontier, not any single run.
+
+**Why it matters:** It explains a 9-round null ($\sim$2.9h $\times$ 2 VM sessions) as a *method* limitation, not evidence for the biological ceiling — the loop confounds "only faces drive this ROI" with "this method cannot ban faces." It also rules out the tempting quick fix (reweight drive vs repel) on principled grounds.
+**How to apply:** Build a context-robust, differentiable face-structure surrogate on a non-CLIP backbone; sweep the face-ness constraint $\tau$ and plot the achievable-drive frontier; validate any low-$F$ high-drive hit with a held-out face detector before believing it. Keep the cluster loop only as the "canonical driver" bootstrap (round 0), not as the escape mechanism.
+**Source:** `brainconcept/vendor_conceptlab/training/coach.py` (drive/repel branch, L475–506); `brainconcept/continual_clf.py` (logistic archive-vs-neg probe); 9-round results artifact `claude.ai/code/artifact/514b3a8d-b3d3-4415-9c80-a79ef6b041a4`; pipeline explainer `claude.ai/code/artifact/609c2320-1f80-4426-8b35-d9add346c187`.
+
+
+---
+
 <a id="l-20260929-cosine-vs-classifier"></a>
 
 ## 2026-09-29 — A cosine-to-prototype repel cannot leave a category; only a two-class discriminant can
