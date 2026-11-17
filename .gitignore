@@ -2,8 +2,10 @@
 __pycache__/
 .DS_Store
 
-# external clones / large weights (not our work)
-brainit-fmri/
+# external clones: vendored as plain code; ignore large generated data/results
+brainit-fmri/results/
+brainit-fmri/nsd_data/
+brainit-fmri/data/derived_data/
 
 # brainconcept: keep code only — ignore generated reports, images, data, papers
 brainconcept/RESULTS/
